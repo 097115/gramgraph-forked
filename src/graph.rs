@@ -8,6 +8,7 @@ pub struct GraphConfig {
     pub y_label: String,
     pub width: u32,
     pub height: u32,
+    pub line_color: Option<String>,
 }
 
 pub fn generate_line_graph(
@@ -90,8 +91,20 @@ pub fn generate_line_graph(
             .zip(y_values.into_iter())
             .collect();
 
+        // Parse line color or default to blue
+        let color = match config.line_color.as_deref() {
+            Some("red") => RED.mix(0.8),
+            Some("green") => GREEN.mix(0.8),
+            Some("blue") => BLUE.mix(0.8),
+            Some("black") => BLACK.mix(0.8),
+            Some("yellow") => YELLOW.mix(0.8),
+            Some("cyan") => CYAN.mix(0.8),
+            Some("magenta") => MAGENTA.mix(0.8),
+            _ => BLUE.mix(0.8), // default
+        };
+
         chart
-            .draw_series(LineSeries::new(points, &BLUE.mix(0.8)))
+            .draw_series(LineSeries::new(points, &color))
             .context("Failed to draw line series")?;
 
         root.present().context("Failed to present drawing")?;

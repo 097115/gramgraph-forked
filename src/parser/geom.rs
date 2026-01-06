@@ -1,6 +1,6 @@
 // Geometry (geom) parser for Grammar of Graphics DSL
 
-use super::ast::{Layer, LineLayer, PointLayer};
+use super::ast::{BarLayer, BarPosition, Layer, LineLayer, PointLayer};
 use super::lexer::{identifier, number_literal, string_literal, ws};
 use nom::{
     branch::alt,
@@ -119,9 +119,73 @@ pub fn parse_point(input: &str) -> IResult<&str, Layer> {
     Ok((input, Layer::Point(layer)))
 }
 
+/// Parse a bar geometry
+/// Format: bar() or bar(color: "red", position: "dodge", ...)
+pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("bar"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+
+    // Parse optional named arguments
+    // We need to handle position specially as it's a string that maps to an enum
+    let (input, args) = separated_list0(
+        ws(char(',')),
+        alt((
+            map(
+                preceded(ws(tag("x:")), ws(identifier)),
+                |x| ("x", x, 0.0),
+            ),
+            map(
+                preceded(ws(tag("y:")), ws(identifier)),
+                |y| ("y", y, 0.0),
+            ),
+            map(
+                preceded(ws(tag("color:")), ws(string_literal)),
+                |c| ("color", c, 0.0),
+            ),
+            map(
+                preceded(ws(tag("width:")), ws(number_literal)),
+                |w| ("width", String::new(), w),
+            ),
+            map(
+                preceded(ws(tag("alpha:")), ws(number_literal)),
+                |a| ("alpha", String::new(), a),
+            ),
+            map(
+                preceded(ws(tag("position:")), ws(string_literal)),
+                |p| ("position", p, 0.0),
+            ),
+        )),
+    )(input)?;
+
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = BarLayer::default();
+
+    for (key, str_val, num_val) in args {
+        match key {
+            "x" => layer.x = Some(str_val),
+            "y" => layer.y = Some(str_val),
+            "color" => layer.color = Some(str_val),
+            "width" => layer.width = Some(num_val),
+            "alpha" => layer.alpha = Some(num_val),
+            "position" => {
+                layer.position = match str_val.as_str() {
+                    "dodge" => BarPosition::Dodge,
+                    "stack" => BarPosition::Stack,
+                    "identity" => BarPosition::Identity,
+                    _ => BarPosition::Identity, // default for unknown values
+                };
+            }
+            _ => {}
+        }
+    }
+
+    Ok((input, Layer::Bar(layer)))
+}
+
 /// Parse any geometry layer
 pub fn parse_geom(input: &str) -> IResult<&str, Layer> {
-    alt((parse_line, parse_point))(input)
+    alt((parse_line, parse_point, parse_bar))(input)
 }
 
 #[cfg(test)]
@@ -165,6 +229,76 @@ mod tests {
                 assert_eq!(p.size, Some(5.0));
             }
             _ => panic!("Expected Point layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_empty() {
+        let result = parse_bar("bar()");
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.color, None);
+                assert_eq!(b.alpha, None);
+                assert_eq!(b.position, BarPosition::Identity);
+            }
+            _ => panic!("Expected Bar layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_with_position() {
+        let result = parse_bar(r#"bar(position: "dodge")"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.position, BarPosition::Dodge);
+            }
+            _ => panic!("Expected Bar layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_with_stack_position() {
+        let result = parse_bar(r#"bar(position: "stack")"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.position, BarPosition::Stack);
+            }
+            _ => panic!("Expected Bar layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_with_color() {
+        let result = parse_bar(r#"bar(color: "red")"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.color, Some("red".to_string()));
+            }
+            _ => panic!("Expected Bar layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_full() {
+        let result = parse_bar(r#"bar(position: "stack", color: "blue", alpha: 0.7, width: 0.6)"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.position, BarPosition::Stack);
+                assert_eq!(b.color, Some("blue".to_string()));
+                assert_eq!(b.alpha, Some(0.7));
+                assert_eq!(b.width, Some(0.6));
+            }
+            _ => panic!("Expected Bar layer"),
         }
     }
 }

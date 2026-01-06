@@ -23,7 +23,8 @@ pub struct Aesthetics {
 pub enum Layer {
     Line(LineLayer),
     Point(PointLayer),
-    // Future: Bar, Area, Ribbon, Histogram, etc.
+    Bar(BarLayer),
+    // Future: Area, Ribbon, Histogram, etc.
 }
 
 /// Line geometry layer
@@ -52,6 +53,36 @@ pub struct PointLayer {
     pub size: Option<f64>,
     pub shape: Option<String>,
     pub alpha: Option<f64>,
+}
+
+/// Bar geometry layer
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BarLayer {
+    // Aesthetic overrides
+    pub x: Option<String>,
+    pub y: Option<String>,
+
+    // Fixed visual properties
+    pub color: Option<String>,
+    pub alpha: Option<f64>,
+    pub width: Option<f64>, // Bar width (0.0-1.0, relative to category spacing)
+
+    // Positioning strategy
+    pub position: BarPosition,
+}
+
+/// Bar positioning modes (how bars are arranged)
+#[derive(Debug, Clone, PartialEq)]
+pub enum BarPosition {
+    Identity, // Bars overlap at same x position
+    Dodge,    // Bars side-by-side
+    Stack,    // Bars stacked vertically
+}
+
+impl Default for BarPosition {
+    fn default() -> Self {
+        BarPosition::Identity
+    }
 }
 
 /// Plot labels (title, axes)

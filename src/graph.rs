@@ -20,6 +20,14 @@ pub struct PointStyle {
     pub alpha: Option<f64>,
 }
 
+/// Style configuration for bar layers
+#[derive(Debug, Clone)]
+pub struct BarStyle {
+    pub color: Option<String>,
+    pub alpha: Option<f64>,
+    pub width: Option<f64>,
+}
+
 /// Canvas for multi-layer plotting
 pub struct Canvas {
     buffer: Vec<u8>,
@@ -188,6 +196,221 @@ impl Canvas {
                 Circle::new((x, y), size, color.filled())
             }))
             .context("Failed to draw point series")?;
+
+        root.present().context("Failed to present drawing")?;
+
+        Ok(())
+    }
+
+    /// Add a bar layer to the canvas (categorical x-axis)
+    pub fn add_bar_layer(
+        &mut self,
+        categories: Vec<String>,
+        y_data: Vec<f64>,
+        style: BarStyle,
+    ) -> Result<()> {
+        if categories.len() != y_data.len() {
+            anyhow::bail!(
+                "Categories and Y data must have the same length (categories: {}, y: {})",
+                categories.len(),
+                y_data.len()
+            );
+        }
+
+        if categories.is_empty() {
+            anyhow::bail!("Cannot create bar chart with no data");
+        }
+
+        let root = BitMapBackend::with_buffer(&mut self.buffer, (self.width, self.height))
+            .into_drawing_area();
+
+        if !self.chart_initialized {
+            root.fill(&WHITE).context("Failed to fill background")?;
+            self.chart_initialized = true;
+        }
+
+        let num_categories = categories.len();
+        let x_range = 0.0..(num_categories as f64);
+
+        let mut chart = ChartBuilder::on(&root)
+            .margin(10)
+            .caption(self.title.as_deref().unwrap_or(""), ("sans-serif", 20))
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(x_range.clone(), self.y_range.clone())
+            .context("Failed to build chart")?;
+
+        // Configure mesh with custom x-axis labels
+        let categories_clone = categories.clone();
+        chart
+            .configure_mesh()
+            .x_labels(num_categories)
+            .x_label_formatter(&|x| {
+                let idx = *x as usize;
+                if idx < categories_clone.len() {
+                    categories_clone[idx].clone()
+                } else {
+                    String::new()
+                }
+            })
+            .draw()
+            .context("Failed to draw mesh")?;
+
+        // Draw bars
+        let color = parse_color(&style.color);
+        let alpha = style.alpha.unwrap_or(1.0);
+        let color_with_alpha = color.mix(alpha);
+        let bar_width = style.width.unwrap_or(0.8);
+
+        for (cat_idx, &y_val) in y_data.iter().enumerate() {
+            let x_center = cat_idx as f64 + 0.5;
+            chart
+                .draw_series(std::iter::once(Rectangle::new(
+                    [
+                        (x_center - bar_width / 2.0, 0.0),
+                        (x_center + bar_width / 2.0, y_val),
+                    ],
+                    color_with_alpha.filled(),
+                )))
+                .context("Failed to draw bar")?;
+        }
+
+        root.present().context("Failed to present drawing")?;
+
+        Ok(())
+    }
+
+    /// Add multiple bar series with dodge or stack positioning
+    pub fn add_bar_group(
+        &mut self,
+        categories: Vec<String>,
+        series: Vec<(Vec<f64>, BarStyle)>, // (y_data, style) for each series
+        position: &str, // "dodge", "stack", or "identity"
+    ) -> Result<()> {
+        if categories.is_empty() {
+            anyhow::bail!("Cannot create bar chart with no categories");
+        }
+
+        if series.is_empty() {
+            anyhow::bail!("Cannot create bar chart with no series");
+        }
+
+        let root = BitMapBackend::with_buffer(&mut self.buffer, (self.width, self.height))
+            .into_drawing_area();
+
+        if !self.chart_initialized {
+            root.fill(&WHITE).context("Failed to fill background")?;
+            self.chart_initialized = true;
+        }
+
+        let num_categories = categories.len();
+        let num_series = series.len();
+        let x_range = 0.0..(num_categories as f64);
+
+        let mut chart = ChartBuilder::on(&root)
+            .margin(10)
+            .caption(self.title.as_deref().unwrap_or(""), ("sans-serif", 20))
+            .x_label_area_size(40)
+            .y_label_area_size(50)
+            .build_cartesian_2d(x_range.clone(), self.y_range.clone())
+            .context("Failed to build chart")?;
+
+        // Configure mesh with custom x-axis labels
+        let categories_clone = categories.clone();
+        chart
+            .configure_mesh()
+            .x_labels(num_categories)
+            .x_label_formatter(&|x| {
+                let idx = *x as usize;
+                if idx < categories_clone.len() {
+                    categories_clone[idx].clone()
+                } else {
+                    String::new()
+                }
+            })
+            .draw()
+            .context("Failed to draw mesh")?;
+
+        match position {
+            "dodge" => {
+                // Side-by-side bars
+                let bar_width = 0.8 / num_series as f64;
+
+                for (series_idx, (y_data, style)) in series.iter().enumerate() {
+                    let color = parse_color(&style.color);
+                    let alpha = style.alpha.unwrap_or(1.0);
+                    let color_with_alpha = color.mix(alpha);
+
+                    for (cat_idx, &y_val) in y_data.iter().enumerate() {
+                        let x_base = cat_idx as f64;
+                        let x_offset = (series_idx as f64 - (num_series as f64 - 1.0) / 2.0) * bar_width;
+                        let x_center = x_base + 0.5 + x_offset;
+
+                        chart
+                            .draw_series(std::iter::once(Rectangle::new(
+                                [
+                                    (x_center - bar_width / 2.0, 0.0),
+                                    (x_center + bar_width / 2.0, y_val),
+                                ],
+                                color_with_alpha.filled(),
+                            )))
+                            .context("Failed to draw bar")?;
+                    }
+                }
+            }
+            "stack" => {
+                // Stacked bars
+                let bar_width = 0.8;
+
+                for cat_idx in 0..num_categories {
+                    let x_center = cat_idx as f64 + 0.5;
+                    let mut y_cumulative = 0.0;
+
+                    for (y_data, style) in series.iter() {
+                        let y_val = y_data[cat_idx];
+                        let color = parse_color(&style.color);
+                        let alpha = style.alpha.unwrap_or(1.0);
+                        let color_with_alpha = color.mix(alpha);
+
+                        chart
+                            .draw_series(std::iter::once(Rectangle::new(
+                                [
+                                    (x_center - bar_width / 2.0, y_cumulative),
+                                    (x_center + bar_width / 2.0, y_cumulative + y_val),
+                                ],
+                                color_with_alpha.filled(),
+                            )))
+                            .context("Failed to draw bar")?;
+
+                        y_cumulative += y_val;
+                    }
+                }
+            }
+            _ => {
+                // Identity (overlapping) - default
+                let bar_width = 0.8;
+
+                for (y_data, style) in series.iter() {
+                    let color = parse_color(&style.color);
+                    let alpha = style.alpha.unwrap_or(0.5); // Default semi-transparent for overlapping
+                    let color_with_alpha = color.mix(alpha);
+
+                    for (cat_idx, &y_val) in y_data.iter().enumerate() {
+                        let x_center = cat_idx as f64 + 0.5;
+
+                        chart
+                            .draw_series(std::iter::once(Rectangle::new(
+                                [
+                                    (x_center - bar_width / 2.0, 0.0),
+                                    (x_center + bar_width / 2.0, y_val),
+                                ],
+                                color_with_alpha.filled(),
+                            )))
+                            .context("Failed to draw bar")?;
+                    }
+                }
+            }
+        }
 
         root.present().context("Failed to present drawing")?;
 

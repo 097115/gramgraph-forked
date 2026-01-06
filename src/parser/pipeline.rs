@@ -97,4 +97,41 @@ mod tests {
         assert!(spec.aesthetics.is_some());
         assert_eq!(spec.layers.len(), 1);
     }
+
+    #[test]
+    fn test_parse_plot_spec_trailing_pipe() {
+        // Trailing pipe should fail (nothing after last pipe)
+        assert!(parse_plot_spec("aes(x: a, y: b) | line() |").is_err());
+    }
+
+    #[test]
+    fn test_parse_plot_spec_missing_geom() {
+        // Aesthetics without any geometry should fail (needs at least one geom)
+        assert!(parse_plot_spec("aes(x: a, y: b)").is_err());
+    }
+
+    #[test]
+    fn test_parse_plot_spec_empty_input() {
+        // Empty input should fail
+        assert!(parse_plot_spec("").is_err());
+    }
+
+    #[test]
+    fn test_parse_plot_spec_three_layers() {
+        // Three layers: line + point + bar
+        let result = parse_plot_spec(r#"aes(x: a, y: b) | line() | point() | bar()"#);
+        assert!(result.is_ok());
+        let (_, spec) = result.unwrap();
+        assert_eq!(spec.layers.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_plot_spec_df_without_aes() {
+        // df prefix without aesthetics should succeed
+        let result = parse_plot_spec("df | line()");
+        assert!(result.is_ok());
+        let (_, spec) = result.unwrap();
+        assert!(spec.aesthetics.is_none());
+        assert_eq!(spec.layers.len(), 1);
+    }
 }

@@ -301,4 +301,84 @@ mod tests {
             _ => panic!("Expected Bar layer"),
         }
     }
+
+    #[test]
+    fn test_parse_line_all_params() {
+        // Test line with all parameters: x, y, color, width, alpha
+        let result = parse_line(r#"line(x: col1, y: col2, color: "red", width: 2, alpha: 0.5)"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Line(l) => {
+                assert_eq!(l.x, Some("col1".to_string()));
+                assert_eq!(l.y, Some("col2".to_string()));
+                assert_eq!(l.color, Some("red".to_string()));
+                assert_eq!(l.width, Some(2.0));
+                assert_eq!(l.alpha, Some(0.5));
+            }
+            _ => panic!("Expected Line layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_point_all_params() {
+        // Test point with all parameters: x, y, color, size, alpha
+        let result = parse_point(r#"point(x: col1, y: col2, color: "blue", size: 10, alpha: 0.8)"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Point(p) => {
+                assert_eq!(p.x, Some("col1".to_string()));
+                assert_eq!(p.y, Some("col2".to_string()));
+                assert_eq!(p.color, Some("blue".to_string()));
+                assert_eq!(p.size, Some(10.0));
+                assert_eq!(p.alpha, Some(0.8));
+            }
+            _ => panic!("Expected Point layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_geom_whitespace_variations() {
+        // Extra spaces around parentheses and commas should be handled
+        let result = parse_line(r#"  line ( color: "red" , width: 2 )  "#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Line(l) => {
+                assert_eq!(l.color, Some("red".to_string()));
+                assert_eq!(l.width, Some(2.0));
+            }
+            _ => panic!("Expected Line layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_bar_invalid_position() {
+        // Unknown position value defaults to identity
+        let result = parse_bar(r#"bar(position: "unknown")"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Bar(b) => {
+                assert_eq!(b.position, BarPosition::Identity); // Should default
+            }
+            _ => panic!("Expected Bar layer"),
+        }
+    }
+
+    #[test]
+    fn test_parse_geom_multiple_params() {
+        // Test that multiple parameters work correctly
+        let result = parse_line(r#"line(color: "red", width: 2)"#);
+        assert!(result.is_ok());
+        let (_, layer) = result.unwrap();
+        match layer {
+            Layer::Line(l) => {
+                assert_eq!(l.color, Some("red".to_string()));
+                assert_eq!(l.width, Some(2.0));
+            }
+            _ => panic!("Expected Line layer"),
+        }
+    }
 }

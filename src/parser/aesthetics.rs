@@ -50,4 +50,34 @@ mod tests {
         assert_eq!(aes.x, "time");
         assert_eq!(aes.y, "temp");
     }
+
+    #[test]
+    fn test_parse_aesthetics_missing_x() {
+        // Missing x parameter should fail
+        assert!(parse_aesthetics("aes(y: temp)").is_err());
+    }
+
+    #[test]
+    fn test_parse_aesthetics_missing_comma() {
+        // Missing comma between x and y should fail
+        assert!(parse_aesthetics("aes(x: time y: temp)").is_err());
+    }
+
+    #[test]
+    fn test_parse_aesthetics_wrong_order() {
+        // y before x should fail (parser expects x first)
+        assert!(parse_aesthetics("aes(y: temp, x: time)").is_err());
+    }
+
+    #[test]
+    fn test_parse_aesthetics_extra_comma() {
+        // Extra comma should fail
+        assert!(parse_aesthetics("aes(x: time,, y: temp)").is_err());
+    }
+
+    #[test]
+    fn test_parse_aesthetics_unclosed_paren() {
+        // Unclosed parenthesis should fail
+        assert!(parse_aesthetics("aes(x: time, y: temp").is_err());
+    }
 }

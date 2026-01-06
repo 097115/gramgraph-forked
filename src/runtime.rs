@@ -328,3 +328,475 @@ struct BarData {
     categories: Vec<String>,
     y_data: Vec<f64>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::ast::{BarPosition, Aesthetics, PlotSpec};
+
+    /// Helper to create test CsvData
+    fn make_csv_data(headers: Vec<&str>, rows: Vec<Vec<&str>>) -> CsvData {
+        CsvData {
+            headers: headers.iter().map(|s| s.to_string()).collect(),
+            rows: rows.iter()
+                .map(|r| r.iter().map(|s| s.to_string()).collect())
+                .collect(),
+        }
+    }
+
+    // validate_layer_compatibility tests (5 tests)
+
+    #[test]
+    fn test_validate_layer_compatibility_line_only() {
+        let layers = vec![Layer::Line(LineLayer::default())];
+        assert!(validate_layer_compatibility(&layers).is_ok());
+    }
+
+    #[test]
+    fn test_validate_layer_compatibility_point_only() {
+        let layers = vec![Layer::Point(PointLayer::default())];
+        assert!(validate_layer_compatibility(&layers).is_ok());
+    }
+
+    #[test]
+    fn test_validate_layer_compatibility_bar_only() {
+        let layers = vec![Layer::Bar(BarLayer::default())];
+        assert!(validate_layer_compatibility(&layers).is_ok());
+    }
+
+    #[test]
+    fn test_validate_layer_compatibility_line_and_point() {
+        let layers = vec![
+            Layer::Line(LineLayer::default()),
+            Layer::Point(PointLayer::default()),
+        ];
+        assert!(validate_layer_compatibility(&layers).is_ok());
+    }
+
+    #[test]
+    fn test_validate_layer_compatibility_bar_and_line() {
+        let layers = vec![
+            Layer::Bar(BarLayer::default()),
+            Layer::Line(LineLayer::default()),
+        ];
+        let result = validate_layer_compatibility(&layers);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Cannot mix"));
+    }
+
+    // resolve_aesthetics tests (5 tests)
+
+    #[test]
+    fn test_resolve_aesthetics_from_global() {
+        let layer = Layer::Line(LineLayer::default());
+        let global_aes = Some(Aesthetics {
+            x: "time".to_string(),
+            y: "temp".to_string(),
+        });
+        let (x, y) = resolve_aesthetics(&layer, &global_aes).unwrap();
+        assert_eq!(x, "time");
+        assert_eq!(y, "temp");
+    }
+
+    #[test]
+    fn test_resolve_aesthetics_layer_override_y() {
+        let layer = Layer::Line(LineLayer {
+            x: None,
+            y: Some("humidity".to_string()),
+            color: None,
+            width: None,
+            alpha: None,
+        });
+        let global_aes = Some(Aesthetics {
+            x: "time".to_string(),
+            y: "temp".to_string(),
+        });
+        let (x, y) = resolve_aesthetics(&layer, &global_aes).unwrap();
+        assert_eq!(x, "time");
+        assert_eq!(y, "humidity");
+    }
+
+    #[test]
+    fn test_resolve_aesthetics_layer_override_both() {
+        let layer = Layer::Point(PointLayer {
+            x: Some("date".to_string()),
+            y: Some("value".to_string()),
+            color: None,
+            size: None,
+            shape: None,
+            alpha: None,
+        });
+        let global_aes = Some(Aesthetics {
+            x: "time".to_string(),
+            y: "temp".to_string(),
+        });
+        let (x, y) = resolve_aesthetics(&layer, &global_aes).unwrap();
+        assert_eq!(x, "date");
+        assert_eq!(y, "value");
+    }
+
+    #[test]
+    fn test_resolve_aesthetics_no_global_no_layer() {
+        let layer = Layer::Line(LineLayer::default());
+        let result = resolve_aesthetics(&layer, &None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No x aesthetic"));
+    }
+
+    #[test]
+    fn test_resolve_aesthetics_missing_y() {
+        let layer = Layer::Bar(BarLayer {
+            x: Some("category".to_string()),
+            y: None,
+            color: None,
+            alpha: None,
+            width: None,
+            position: BarPosition::Identity,
+        });
+        let result = resolve_aesthetics(&layer, &None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No y aesthetic"));
+    }
+
+    // extract_categorical_data tests (4 tests)
+
+    #[test]
+    fn test_extract_categorical_data_basic() {
+        let csv = make_csv_data(
+            vec!["category", "value"],
+            vec![vec!["A", "10"], vec!["B", "20"], vec!["C", "30"]],
+        );
+        let (categories, values) = extract_categorical_data(&csv, "category", "value").unwrap();
+        assert_eq!(categories, vec!["A", "B", "C"]);
+        assert_eq!(values, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn test_extract_categorical_data_aggregation() {
+        // Multiple rows with same category should sum
+        let csv = make_csv_data(
+            vec!["category", "value"],
+            vec![vec!["A", "10"], vec!["B", "20"], vec!["A", "15"]],
+        );
+        let (categories, values) = extract_categorical_data(&csv, "category", "value").unwrap();
+        assert_eq!(categories, vec!["A", "B"]);
+        assert_eq!(values, vec![25.0, 20.0]);
+    }
+
+    #[test]
+    fn test_extract_categorical_data_column_not_found() {
+        let csv = make_csv_data(vec!["a", "b"], vec![vec!["1", "2"]]);
+        let result = extract_categorical_data(&csv, "nonexistent", "b");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_extract_categorical_data_non_numeric_y() {
+        let csv = make_csv_data(
+            vec!["category", "value"],
+            vec![vec!["A", "not_a_number"]],
+        );
+        let result = extract_categorical_data(&csv, "category", "value");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse"));
+    }
+
+    // Style conversion tests (4 tests)
+
+    #[test]
+    fn test_line_layer_to_style_defaults() {
+        let layer = LineLayer::default();
+        let style = line_layer_to_style(&layer);
+        assert_eq!(style.color, None);
+        assert_eq!(style.width, None);
+        assert_eq!(style.alpha, None);
+    }
+
+    #[test]
+    fn test_line_layer_to_style_full() {
+        let layer = LineLayer {
+            x: None,
+            y: None,
+            color: Some("red".to_string()),
+            width: Some(2.5),
+            alpha: Some(0.8),
+        };
+        let style = line_layer_to_style(&layer);
+        assert_eq!(style.color, Some("red".to_string()));
+        assert_eq!(style.width, Some(2.5));
+        assert_eq!(style.alpha, Some(0.8));
+    }
+
+    #[test]
+    fn test_point_layer_to_style_defaults() {
+        let layer = PointLayer::default();
+        let style = point_layer_to_style(&layer);
+        assert_eq!(style.color, None);
+        assert_eq!(style.size, None);
+        assert_eq!(style.alpha, None);
+    }
+
+    #[test]
+    fn test_bar_layer_to_style_defaults() {
+        let layer = BarLayer::default();
+        let style = bar_layer_to_style(&layer);
+        assert_eq!(style.color, None);
+        assert_eq!(style.alpha, None);
+        assert_eq!(style.width, None);
+    }
+
+    // render_continuous_plot tests (4 tests)
+
+    #[test]
+    fn test_render_continuous_plot_line() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![Layer::Line(LineLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"], vec!["2", "20"]]);
+        let result = render_continuous_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_continuous_plot_point() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![Layer::Point(PointLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"]]);
+        let result = render_continuous_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_continuous_plot_line_and_point() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![
+                Layer::Line(LineLayer::default()),
+                Layer::Point(PointLayer::default()),
+            ],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"], vec!["2", "20"]]);
+        let result = render_continuous_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_continuous_plot_column_not_found() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "nonexistent".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![Layer::Line(LineLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"]]);
+        let result = render_continuous_plot(spec, csv);
+        assert!(result.is_err());
+    }
+
+    // render_bar_plot tests (4 tests)
+
+    #[test]
+    fn test_render_bar_plot_single() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "category".to_string(),
+                y: "value".to_string(),
+            }),
+            layers: vec![Layer::Bar(BarLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(
+            vec!["category", "value"],
+            vec![vec!["A", "10"], vec!["B", "20"]],
+        );
+        let result = render_bar_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_bar_plot_dodge() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "category".to_string(),
+                y: "v1".to_string(),
+            }),
+            layers: vec![
+                Layer::Bar(BarLayer {
+                    x: None,
+                    y: None,
+                    color: Some("blue".to_string()),
+                    alpha: None,
+                    width: None,
+                    position: BarPosition::Dodge,
+                }),
+                Layer::Bar(BarLayer {
+                    x: None,
+                    y: Some("v2".to_string()),
+                    color: Some("red".to_string()),
+                    alpha: None,
+                    width: None,
+                    position: BarPosition::Dodge,
+                }),
+            ],
+            labels: None,
+        };
+        let csv = make_csv_data(
+            vec!["category", "v1", "v2"],
+            vec![vec!["A", "10", "15"], vec!["B", "20", "25"]],
+        );
+        let result = render_bar_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_bar_plot_stack() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "category".to_string(),
+                y: "v1".to_string(),
+            }),
+            layers: vec![
+                Layer::Bar(BarLayer {
+                    x: None,
+                    y: None,
+                    color: None,
+                    alpha: None,
+                    width: None,
+                    position: BarPosition::Stack,
+                }),
+                Layer::Bar(BarLayer {
+                    x: None,
+                    y: Some("v2".to_string()),
+                    color: None,
+                    alpha: None,
+                    width: None,
+                    position: BarPosition::Stack,
+                }),
+            ],
+            labels: None,
+        };
+        let csv = make_csv_data(
+            vec!["category", "v1", "v2"],
+            vec![vec!["A", "10", "15"]],
+        );
+        let result = render_bar_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_bar_plot_identity() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "category".to_string(),
+                y: "value".to_string(),
+            }),
+            layers: vec![
+                Layer::Bar(BarLayer::default()),
+                Layer::Bar(BarLayer {
+                    x: None,
+                    y: Some("v2".to_string()),
+                    color: None,
+                    alpha: None,
+                    width: None,
+                    position: BarPosition::Identity,
+                }),
+            ],
+            labels: None,
+        };
+        let csv = make_csv_data(
+            vec!["category", "value", "v2"],
+            vec![vec!["A", "10", "15"]],
+        );
+        let result = render_bar_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    // render_plot tests (4 tests)
+
+    #[test]
+    fn test_render_plot_no_layers() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"]]);
+        let result = render_plot(spec, csv);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("at least one"));
+    }
+
+    #[test]
+    fn test_render_plot_line_success() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![Layer::Line(LineLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["1", "10"], vec!["2", "20"]]);
+        let result = render_plot(spec, csv);
+        assert!(result.is_ok());
+        // Check it's a PNG
+        let png_bytes = result.unwrap();
+        assert!(png_bytes.len() > 8);
+        assert_eq!(&png_bytes[0..8], &[137, 80, 78, 71, 13, 10, 26, 10]);
+    }
+
+    #[test]
+    fn test_render_plot_bar_success() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "cat".to_string(),
+                y: "val".to_string(),
+            }),
+            layers: vec![Layer::Bar(BarLayer::default())],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["cat", "val"], vec![vec!["A", "10"], vec!["B", "20"]]);
+        let result = render_plot(spec, csv);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_render_plot_mixed_bar_line_error() {
+        let spec = PlotSpec {
+            aesthetics: Some(Aesthetics {
+                x: "x".to_string(),
+                y: "y".to_string(),
+            }),
+            layers: vec![
+                Layer::Bar(BarLayer::default()),
+                Layer::Line(LineLayer::default()),
+            ],
+            labels: None,
+        };
+        let csv = make_csv_data(vec!["x", "y"], vec![vec!["A", "10"]]);
+        let result = render_plot(spec, csv);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Cannot mix"));
+    }
+}

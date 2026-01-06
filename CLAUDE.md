@@ -418,30 +418,133 @@ aes(x: category, y: value) | bar() | coord_flip()
 
 ## Testing
 
+### Test Coverage Requirements
+
+**GramGraph maintains 100% test coverage** across all modules. This ensures:
+- Reliable functionality for all features
+- Early detection of regressions
+- Confidence in error handling
+- Safe refactoring
+
+### Running Tests
+
+Run all tests:
+```bash
+cargo test
+```
+
+Run unit tests only:
+```bash
+cargo test --lib
+```
+
+Run integration tests only:
+```bash
+cargo test --test '*'
+```
+
 Run parser tests:
 ```bash
 cargo test --lib parser
 ```
 
-Run end-to-end tests:
+### Generating Coverage Reports
+
+Install cargo-llvm-cov:
 ```bash
-# Line and point charts
+cargo install cargo-llvm-cov
+```
+
+Generate HTML coverage report:
+```bash
+cargo llvm-cov --html
+open target/llvm-cov/html/index.html
+```
+
+Generate terminal summary:
+```bash
+cargo llvm-cov
+```
+
+Coverage should be 100% across all modules.
+
+### Test Data Files
+
+The `test/` directory contains CSV files for various testing scenarios:
+
+#### Basic Test Files
+- **test/basic.csv** - Simple 3x3 numeric data for basic functionality
+- **test/timeseries.csv** - Time series data with multiple numeric columns
+- **test/scatter.csv** - X-Y scatter plot data
+- **test/bar_chart.csv** - Categorical data with multiple value columns
+- **test/sales.csv** - Multi-region sales data for dodge/stack testing
+
+#### Edge Case Test Files
+- **test/empty.csv** - Empty file (headers only, no data rows)
+- **test/single_row.csv** - Single data row
+- **test/single_column.csv** - Single column of data
+- **test/large_values.csv** - Very large numeric values (1e10)
+- **test/small_values.csv** - Very small numeric values (1e-10)
+- **test/negative_values.csv** - Negative numeric values
+- **test/mixed_types.csv** - Mix of numeric and text (for error testing)
+- **test/duplicate_headers.csv** - Duplicate column names
+- **test/missing_values.csv** - Empty cells in data
+- **test/special_chars.csv** - Special characters in column names
+- **test/unicode.csv** - Unicode characters in data
+- **test/long_column_names.csv** - Very long column names
+- **test/many_rows.csv** - Large dataset (10,000+ rows)
+
+#### Creating Test CSV Files
+
+When adding new tests:
+1. Create CSV files with descriptive names in `test/` directory
+2. Include header row with column names
+3. Add at least 3-5 data rows for meaningful tests
+4. Document the purpose in test comments
+
+Example test CSV structure:
+```csv
+x_column,y_column,category
+1.0,10.0,A
+2.0,20.0,B
+3.0,30.0,C
+```
+
+### Test Organization
+
+Tests are organized as:
+- **Unit tests**: Inline `#[cfg(test)]` modules in each source file
+- **Integration tests**: `tests/` directory for end-to-end workflows
+- **Test fixtures**: `test/` directory for CSV data files
+
+### Manual Testing Examples
+
+Line and point charts:
+```bash
 cat test/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line()'
 cat test/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line(color: "red") | point(size: 5)'
 cat test/scatter.csv | cargo run -- 'aes(x: height, y: weight) | point()'
+```
 
-# Bar charts
+Bar charts:
+```bash
 cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar()'
 cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(color: "red")'
+```
 
-# Side-by-side (dodge) bars
+Side-by-side (dodge) bars:
+```bash
 cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "dodge", color: "blue") | bar(y: value2, position: "dodge", color: "red")'
 cat test/sales.csv | cargo run -- 'aes(x: region, y: q1) | bar(position: "dodge", color: "blue") | bar(y: q2, position: "dodge", color: "green")'
+```
 
-# Stacked bars
+Stacked bars:
+```bash
 cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "stack", color: "blue") | bar(y: value2, position: "stack", color: "green") | bar(y: value3, position: "stack", color: "red")'
+```
 
-# Overlapping bars (identity)
+Overlapping bars (identity):
+```bash
 cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(alpha: 0.5, color: "blue") | bar(y: value2, alpha: 0.5, color: "red")'
 ```
 

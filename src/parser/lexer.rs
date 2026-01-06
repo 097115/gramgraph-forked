@@ -70,7 +70,7 @@ mod tests {
     #[test]
     fn test_number_literal() {
         assert_eq!(number_literal("42"), Ok(("", 42.0)));
-        assert_eq!(number_literal("3.14"), Ok(("", 3.5)));
+        assert_eq!(number_literal("3.5"), Ok(("", 3.5)));
         assert_eq!(number_literal("2020"), Ok(("", 2020.0)));
     }
 

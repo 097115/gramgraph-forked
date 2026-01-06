@@ -1,106 +1,134 @@
-// Runtime executor for PlotPipe DSL
+// Runtime executor for Grammar of Graphics DSL
 
-use crate::parser::ast::{Command, Pipeline};
 use crate::csv_reader::{self, CsvData};
-use crate::graph::{self, GraphConfig};
+use crate::graph;
+use crate::parser::ast::{Aesthetics, Layer, LineLayer, PlotSpec, PointLayer};
 use anyhow::{Context, Result};
 
-/// Runtime context for executing commands
-pub struct RuntimeContext {
-    pub csv_data: CsvData,
-    pub chart_config: Option<ChartState>,
-}
-
-/// Chart configuration state
-struct ChartState {
-    x_column: String,
-    y_column: String,
-    title: Option<String>,
-    line_color: Option<String>,
-    line_stroke: Option<u32>,
-    point_shape: Option<String>,
-    point_size: Option<u32>,
-}
-
-/// Execute a parsed pipeline and return PNG bytes
-pub fn execute_pipeline(pipeline: Pipeline, csv_data: CsvData) -> Result<Vec<u8>> {
-    let mut ctx = RuntimeContext {
-        csv_data,
-        chart_config: None,
-    };
-
-    // Execute each command in sequence
-    for command in pipeline.commands {
-        execute_command(command, &mut ctx)?;
+/// Render a plot specification to PNG bytes
+pub fn render_plot(spec: PlotSpec, csv_data: CsvData) -> Result<Vec<u8>> {
+    // Validate: must have at least one layer
+    if spec.layers.is_empty() {
+        anyhow::bail!("Plot requires at least one geometry layer (line, point, etc.)");
     }
 
-    // Generate final graph
-    render_chart(&ctx)
+    // Prepare to collect all data for range calculation
+    let mut all_x_data = Vec::new();
+    let mut all_y_data = Vec::new();
+
+    // Collect layer specifications with resolved aesthetics and data
+    let mut layer_specs: Vec<LayerData> = Vec::new();
+
+    for layer in &spec.layers {
+        let (x_col, y_col) = resolve_aesthetics(layer, &spec.aesthetics)?;
+
+        // Extract data for this layer
+        let x_selector = csv_reader::parse_column_selector(&x_col);
+        let (x_col_name, x_values) = csv_reader::extract_column(&csv_data, x_selector)
+            .context(format!("Failed to extract x column '{}'", x_col))?;
+
+        let y_selector = csv_reader::parse_column_selector(&y_col);
+        let (y_col_name, y_values) = csv_reader::extract_column(&csv_data, y_selector)
+            .context(format!("Failed to extract y column '{}'", y_col))?;
+
+        // Collect for global range
+        all_x_data.extend(x_values.iter().copied());
+        all_y_data.extend(y_values.iter().copied());
+
+        layer_specs.push(LayerData {
+            layer: layer.clone(),
+            x_data: x_values,
+            y_data: y_values,
+            x_label: x_col_name,
+            y_label: y_col_name,
+        });
+    }
+
+    // Create canvas with global data ranges
+    let mut canvas = graph::Canvas::new(
+        800,
+        600,
+        spec.labels.as_ref().and_then(|l| l.title.clone()),
+        all_x_data,
+        all_y_data,
+    )?;
+
+    // Render each layer
+    for layer_data in layer_specs {
+        match layer_data.layer {
+            Layer::Line(line_layer) => {
+                canvas.add_line_layer(
+                    layer_data.x_data,
+                    layer_data.y_data,
+                    line_layer_to_style(&line_layer),
+                )?;
+            }
+            Layer::Point(point_layer) => {
+                canvas.add_point_layer(
+                    layer_data.x_data,
+                    layer_data.y_data,
+                    point_layer_to_style(&point_layer),
+                )?;
+            }
+        }
+    }
+
+    // Finalize and encode
+    canvas.render()
 }
 
-/// Execute a single command
-fn execute_command(cmd: Command, ctx: &mut RuntimeContext) -> Result<()> {
-    match cmd {
-        Command::Chart { x, y, title } => {
-            ctx.chart_config = Some(ChartState {
-                x_column: x,
-                y_column: y,
-                title,
-                line_color: Some("blue".to_string()), // default
-                line_stroke: Some(1),
-                point_shape: None,
-                point_size: None,
-            });
-            Ok(())
-        }
-        Command::LayerLine { color, stroke } => {
-            if let Some(ref mut config) = ctx.chart_config {
-                if let Some(c) = color {
-                    config.line_color = Some(c);
-                }
-                if let Some(s) = stroke {
-                    config.line_stroke = Some(s);
-                }
-            }
-            Ok(())
-        }
-        Command::LayerPoint { shape, size, color: _ } => {
-            if let Some(ref mut config) = ctx.chart_config {
-                config.point_shape = shape;
-                config.point_size = size;
-            }
-            Ok(())
-        }
+/// Resolve aesthetics for a layer (layer override or global)
+fn resolve_aesthetics(layer: &Layer, global_aes: &Option<Aesthetics>) -> Result<(String, String)> {
+    let (x_override, y_override) = match layer {
+        Layer::Line(l) => (l.x.as_ref(), l.y.as_ref()),
+        Layer::Point(p) => (p.x.as_ref(), p.y.as_ref()),
+    };
+
+    // Get x column
+    let x_col = if let Some(x) = x_override {
+        x.clone()
+    } else if let Some(ref aes) = global_aes {
+        aes.x.clone()
+    } else {
+        anyhow::bail!("No x aesthetic specified (use aes(x: ..., y: ...) or layer-level x: ...)");
+    };
+
+    // Get y column
+    let y_col = if let Some(y) = y_override {
+        y.clone()
+    } else if let Some(ref aes) = global_aes {
+        aes.y.clone()
+    } else {
+        anyhow::bail!("No y aesthetic specified (use aes(x: ..., y: ...) or layer-level y: ...)");
+    };
+
+    Ok((x_col, y_col))
+}
+
+/// Convert LineLayer to graph::LineStyle
+fn line_layer_to_style(layer: &LineLayer) -> graph::LineStyle {
+    graph::LineStyle {
+        color: layer.color.clone(),
+        width: layer.width,
+        alpha: layer.alpha,
     }
 }
 
-/// Render the final chart
-fn render_chart(ctx: &RuntimeContext) -> Result<Vec<u8>> {
-    let config = ctx
-        .chart_config
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("No chart command found in pipeline"))?;
+/// Convert PointLayer to graph::PointStyle
+fn point_layer_to_style(layer: &PointLayer) -> graph::PointStyle {
+    graph::PointStyle {
+        color: layer.color.clone(),
+        size: layer.size,
+        shape: layer.shape.clone(),
+        alpha: layer.alpha,
+    }
+}
 
-    // Extract columns using existing csv_reader
-    let x_selector = csv_reader::parse_column_selector(&config.x_column);
-    let (x_col_name, x_values) = csv_reader::extract_column(&ctx.csv_data, x_selector)
-        .context("Failed to extract X column")?;
-
-    let y_selector = csv_reader::parse_column_selector(&config.y_column);
-    let (y_col_name, y_values) = csv_reader::extract_column(&ctx.csv_data, y_selector)
-        .context("Failed to extract Y column")?;
-
-    // Build graph config
-    let graph_config = GraphConfig {
-        title: config.title.clone(),
-        x_label: x_col_name,
-        y_label: y_col_name,
-        width: 800,
-        height: 600,
-        line_color: config.line_color.clone(),
-    };
-
-    // Generate graph using existing function
-    graph::generate_line_graph(x_values, y_values, graph_config)
-        .context("Failed to generate graph")
+/// Helper struct to hold layer data
+struct LayerData {
+    layer: Layer,
+    x_data: Vec<f64>,
+    y_data: Vec<f64>,
+    x_label: String,
+    y_label: String,
 }

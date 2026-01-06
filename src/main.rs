@@ -23,12 +23,12 @@ fn main() -> Result<()> {
         .context("Failed to read CSV from stdin")?;
 
     // Parse the DSL string
-    let pipeline = match parser::parse_pipeline(&args.dsl) {
-        Ok((remaining, pipeline)) => {
+    let plot_spec = match parser::parse_plot_spec(&args.dsl) {
+        Ok((remaining, plot_spec)) => {
             if !remaining.trim().is_empty() {
                 eprintln!("Warning: unparsed input: '{}'", remaining);
             }
-            pipeline
+            plot_spec
         }
         Err(e) => {
             eprintln!("Parse error: {:?}", e);
@@ -36,9 +36,9 @@ fn main() -> Result<()> {
         }
     };
 
-    // Execute the pipeline
-    let png_bytes = runtime::execute_pipeline(pipeline, csv_data)
-        .context("Failed to execute pipeline")?;
+    // Render the plot
+    let png_bytes = runtime::render_plot(plot_spec, csv_data)
+        .context("Failed to render plot")?;
 
     // Write PNG to stdout
     let stdout = io::stdout();

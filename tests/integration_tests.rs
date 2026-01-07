@@ -123,9 +123,11 @@ fn test_end_to_end_empty_csv() {
 
 #[test]
 fn test_end_to_end_non_numeric_data() {
+    // Unified renderer is more flexible: it treats non-numeric x-data as categorical
+    // This allows line charts with categorical x-axis (like ggplot2)
     let csv = fs::read_to_string("fixtures/mixed_types.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: x, y: y) | line()", &csv);
-    assert!(result.is_err(), "Should have failed with non-numeric data");
+    assert!(result.is_ok(), "Unified renderer handles mixed types by using categorical scale");
 }
 
 #[test]

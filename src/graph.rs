@@ -68,7 +68,32 @@ pub struct Canvas {
 }
 
 impl Canvas {
+    /// Create a new canvas with explicit coordinate ranges
+    ///
+    /// This is the primary constructor for the unified renderer (Phase 3).
+    /// Accepts pre-calculated ranges directly from Scale objects.
+    pub fn with_ranges(
+        width: u32,
+        height: u32,
+        title: Option<String>,
+        x_range: Range<f64>,
+        y_range: Range<f64>,
+    ) -> Result<Self> {
+        Ok(Canvas {
+            width,
+            height,
+            x_range,
+            y_range,
+            title,
+            x_labels: None,
+            layers: Vec::new(),
+        })
+    }
+
     /// Create a new canvas with global data ranges
+    ///
+    /// This is the legacy constructor that calculates ranges from data.
+    /// Internally delegates to `with_ranges()` after computing the ranges.
     pub fn new(
         width: u32,
         height: u32,
@@ -112,15 +137,8 @@ impl Canvas {
             (y_min - padding)..(y_max + padding)
         };
 
-        Ok(Canvas {
-            width,
-            height,
-            x_range,
-            y_range,
-            title,
-            x_labels: None,
-            layers: Vec::new(),
-        })
+        // Delegate to with_ranges()
+        Self::with_ranges(width, height, title, x_range, y_range)
     }
 
     /// Set custom labels for the x-axis (e.g. for categorical data)

@@ -37,7 +37,7 @@ fn is_valid_png(bytes: &[u8]) -> bool {
 
 #[test]
 fn test_end_to_end_line_chart() {
-    let csv = fs::read_to_string("test/timeseries.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/timeseries.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: date, y: temperature) | line()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -46,7 +46,7 @@ fn test_end_to_end_line_chart() {
 
 #[test]
 fn test_end_to_end_scatter_plot() {
-    let csv = fs::read_to_string("test/scatter.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/scatter.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: height, y: weight) | point()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -55,7 +55,7 @@ fn test_end_to_end_scatter_plot() {
 
 #[test]
 fn test_end_to_end_line_plus_points() {
-    let csv = fs::read_to_string("test/timeseries.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/timeseries.csv").expect("Failed to read test CSV");
     let result = run_gramgraph(
         "aes(x: date, y: temperature) | line(color: \"blue\") | point(size: 5)",
         &csv,
@@ -67,7 +67,7 @@ fn test_end_to_end_line_plus_points() {
 
 #[test]
 fn test_end_to_end_bar_chart() {
-    let csv = fs::read_to_string("test/bar_chart.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/bar_chart.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: category, y: value1) | bar()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -76,7 +76,7 @@ fn test_end_to_end_bar_chart() {
 
 #[test]
 fn test_end_to_end_dodge_bars() {
-    let csv = fs::read_to_string("test/sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph(
         "aes(x: region, y: q1) | bar(position: \"dodge\", color: \"blue\") | bar(y: q2, position: \"dodge\", color: \"green\")",
         &csv,
@@ -88,7 +88,7 @@ fn test_end_to_end_dodge_bars() {
 
 #[test]
 fn test_end_to_end_stack_bars() {
-    let csv = fs::read_to_string("test/bar_chart.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/bar_chart.csv").expect("Failed to read test CSV");
     let result = run_gramgraph(
         "aes(x: category, y: value1) | bar(position: \"stack\", color: \"blue\") | bar(y: value2, position: \"stack\", color: \"green\")",
         &csv,
@@ -123,14 +123,14 @@ fn test_end_to_end_empty_csv() {
 
 #[test]
 fn test_end_to_end_non_numeric_data() {
-    let csv = fs::read_to_string("test/mixed_types.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/mixed_types.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: x, y: y) | line()", &csv);
     assert!(result.is_err(), "Should have failed with non-numeric data");
 }
 
 #[test]
 fn test_end_to_end_large_dataset() {
-    let csv = fs::read_to_string("test/many_rows.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/many_rows.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: x, y: y) | line()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -139,7 +139,7 @@ fn test_end_to_end_large_dataset() {
 
 #[test]
 fn test_end_to_end_negative_values() {
-    let csv = fs::read_to_string("test/negative_values.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/negative_values.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: x, y: y) | line()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -148,7 +148,7 @@ fn test_end_to_end_negative_values() {
 
 #[test]
 fn test_end_to_end_unicode() {
-    let csv = fs::read_to_string("test/unicode.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/unicode.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: x, y: température) | line()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -166,7 +166,7 @@ fn test_end_to_end_mixing_bar_and_line() {
 
 #[test]
 fn test_end_to_end_styled_layers() {
-    let csv = fs::read_to_string("test/timeseries.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/timeseries.csv").expect("Failed to read test CSV");
     let result = run_gramgraph(
         "aes(x: date, y: temperature) | line(color: \"red\", width: 2, alpha: 0.7)",
         &csv,
@@ -180,7 +180,7 @@ fn test_end_to_end_styled_layers() {
 
 #[test]
 fn test_end_to_end_grouped_line_by_color() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales, color: region) | line()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -191,7 +191,7 @@ fn test_end_to_end_grouped_line_by_color() {
 
 #[test]
 fn test_end_to_end_grouped_scatter_by_color() {
-    let csv = fs::read_to_string("test/iris.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/iris.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: sepal_length, y: sepal_width, color: species) | point()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -200,7 +200,7 @@ fn test_end_to_end_grouped_scatter_by_color() {
 
 #[test]
 fn test_end_to_end_grouped_with_size() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales, size: region) | point()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -211,7 +211,7 @@ fn test_end_to_end_grouped_with_size() {
 
 #[test]
 fn test_end_to_end_facet_wrap_basic() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales) | line() | facet_wrap(by: region)", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -222,7 +222,7 @@ fn test_end_to_end_facet_wrap_basic() {
 
 #[test]
 fn test_end_to_end_facet_wrap_scatter() {
-    let csv = fs::read_to_string("test/iris.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/iris.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: sepal_length, y: sepal_width) | point() | facet_wrap(by: species)", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -231,7 +231,7 @@ fn test_end_to_end_facet_wrap_scatter() {
 
 #[test]
 fn test_end_to_end_facet_with_ncol() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: Some(2))", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -242,7 +242,7 @@ fn test_end_to_end_facet_with_ncol() {
 
 #[test]
 fn test_end_to_end_facet_plus_grouping() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales, color: product) | line() | facet_wrap(by: region)", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
@@ -251,7 +251,7 @@ fn test_end_to_end_facet_plus_grouping() {
 
 #[test]
 fn test_end_to_end_multiple_layers_grouped() {
-    let csv = fs::read_to_string("test/multiregion_sales.csv").expect("Failed to read test CSV");
+    let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
     let result = run_gramgraph("aes(x: time, y: sales, color: region) | line() | point()", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();

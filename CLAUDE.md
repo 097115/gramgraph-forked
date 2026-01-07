@@ -507,34 +507,34 @@ cat data.csv | cargo run -- 'aes(x: month, y: product_a) | bar(position: "stack"
 ### Data-Driven Aesthetics (Grouped Visualization)
 ```bash
 # Grouped line chart by color - automatically creates different colored lines per region with legend
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: region) | line()'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: region) | line()'
 
 # Grouped scatter plot by color - different colors per species with legend
-cat test/iris.csv | cargo run -- 'aes(x: sepal_length, y: sepal_width, color: species) | point()'
+cat fixtures/iris.csv | cargo run -- 'aes(x: sepal_length, y: sepal_width, color: species) | point()'
 
 # Grouped by size - different point sizes per group
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, size: region) | point()'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, size: region) | point()'
 
 # Multiple layers with grouping
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: region) | line() | point()'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: region) | line() | point()'
 ```
 
 ### Faceting (Small Multiples)
 ```bash
 # Basic faceting - creates grid of subplots, one per region
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region)'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region)'
 
 # Faceted scatter plots
-cat test/iris.csv | cargo run -- 'aes(x: sepal_length, y: sepal_width) | point() | facet_wrap(by: species)'
+cat fixtures/iris.csv | cargo run -- 'aes(x: sepal_length, y: sepal_width) | point() | facet_wrap(by: species)'
 
 # Faceting with custom grid layout (2 columns)
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: Some(2))'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: Some(2))'
 
 # Faceting with independent y-axis scales per panel
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region, scales: "free_y")'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales) | line() | facet_wrap(by: region, scales: "free_y")'
 
 # Combined: faceting + color grouping (grouped lines within each facet panel)
-cat test/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: product) | line() | facet_wrap(by: region)'
+cat fixtures/multiregion_sales.csv | cargo run -- 'aes(x: time, y: sales, color: product) | line() | facet_wrap(by: region)'
 ```
 
 ## Design Decisions
@@ -737,34 +737,34 @@ Coverage should be 100% across all modules.
 
 ### Test Data Files
 
-The `test/` directory contains CSV files for various testing scenarios:
+The `fixtures/` directory contains CSV files for various testing scenarios:
 
 #### Basic Test Files
-- **test/basic.csv** - Simple 3x3 numeric data for basic functionality
-- **test/timeseries.csv** - Time series data with multiple numeric columns
-- **test/scatter.csv** - X-Y scatter plot data
-- **test/bar_chart.csv** - Categorical data with multiple value columns
-- **test/sales.csv** - Multi-region sales data for dodge/stack testing
+- **fixtures/basic.csv** - Simple 3x3 numeric data for basic functionality
+- **fixtures/timeseries.csv** - Time series data with multiple numeric columns
+- **fixtures/scatter.csv** - X-Y scatter plot data
+- **fixtures/bar_chart.csv** - Categorical data with multiple value columns
+- **fixtures/sales.csv** - Multi-region sales data for dodge/stack testing
 
 #### Edge Case Test Files
-- **test/empty.csv** - Empty file (headers only, no data rows)
-- **test/single_row.csv** - Single data row
-- **test/single_column.csv** - Single column of data
-- **test/large_values.csv** - Very large numeric values (1e10)
-- **test/small_values.csv** - Very small numeric values (1e-10)
-- **test/negative_values.csv** - Negative numeric values
-- **test/mixed_types.csv** - Mix of numeric and text (for error testing)
-- **test/duplicate_headers.csv** - Duplicate column names
-- **test/missing_values.csv** - Empty cells in data
-- **test/special_chars.csv** - Special characters in column names
-- **test/unicode.csv** - Unicode characters in data
-- **test/long_column_names.csv** - Very long column names
-- **test/many_rows.csv** - Large dataset (10,000+ rows)
+- **fixtures/empty.csv** - Empty file (headers only, no data rows)
+- **fixtures/single_row.csv** - Single data row
+- **fixtures/single_column.csv** - Single column of data
+- **fixtures/large_values.csv** - Very large numeric values (1e10)
+- **fixtures/small_values.csv** - Very small numeric values (1e-10)
+- **fixtures/negative_values.csv** - Negative numeric values
+- **fixtures/mixed_types.csv** - Mix of numeric and text (for error testing)
+- **fixtures/duplicate_headers.csv** - Duplicate column names
+- **fixtures/missing_values.csv** - Empty cells in data
+- **fixtures/special_chars.csv** - Special characters in column names
+- **fixtures/unicode.csv** - Unicode characters in data
+- **fixtures/long_column_names.csv** - Very long column names
+- **fixtures/many_rows.csv** - Large dataset (10,000+ rows)
 
 #### Creating Test CSV Files
 
 When adding new tests:
-1. Create CSV files with descriptive names in `test/` directory
+1. Create CSV files with descriptive names in `fixtures/` directory
 2. Include header row with column names
 3. Add at least 3-5 data rows for meaningful tests
 4. Document the purpose in test comments
@@ -782,37 +782,37 @@ x_column,y_column,category
 Tests are organized as:
 - **Unit tests**: Inline `#[cfg(test)]` modules in each source file
 - **Integration tests**: `tests/` directory for end-to-end workflows
-- **Test fixtures**: `test/` directory for CSV data files
+- **Test fixtures**: `fixtures/` directory for CSV data files
 
 ### Manual Testing Examples
 
 Line and point charts:
 ```bash
-cat test/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line()'
-cat test/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line(color: "red") | point(size: 5)'
-cat test/scatter.csv | cargo run -- 'aes(x: height, y: weight) | point()'
+cat fixtures/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line()'
+cat fixtures/timeseries.csv | cargo run -- 'aes(x: date, y: temperature) | line(color: "red") | point(size: 5)'
+cat fixtures/scatter.csv | cargo run -- 'aes(x: height, y: weight) | point()'
 ```
 
 Bar charts:
 ```bash
-cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar()'
-cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(color: "red")'
+cat fixtures/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar()'
+cat fixtures/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(color: "red")'
 ```
 
 Side-by-side (dodge) bars:
 ```bash
-cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "dodge", color: "blue") | bar(y: value2, position: "dodge", color: "red")'
-cat test/sales.csv | cargo run -- 'aes(x: region, y: q1) | bar(position: "dodge", color: "blue") | bar(y: q2, position: "dodge", color: "green")'
+cat fixtures/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "dodge", color: "blue") | bar(y: value2, position: "dodge", color: "red")'
+cat fixtures/sales.csv | cargo run -- 'aes(x: region, y: q1) | bar(position: "dodge", color: "blue") | bar(y: q2, position: "dodge", color: "green")'
 ```
 
 Stacked bars:
 ```bash
-cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "stack", color: "blue") | bar(y: value2, position: "stack", color: "green") | bar(y: value3, position: "stack", color: "red")'
+cat fixtures/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(position: "stack", color: "blue") | bar(y: value2, position: "stack", color: "green") | bar(y: value3, position: "stack", color: "red")'
 ```
 
 Overlapping bars (identity):
 ```bash
-cat test/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(alpha: 0.5, color: "blue") | bar(y: value2, alpha: 0.5, color: "red")'
+cat fixtures/bar_chart.csv | cargo run -- 'aes(x: category, y: value1) | bar(alpha: 0.5, color: "blue") | bar(y: value2, alpha: 0.5, color: "red")'
 ```
 
 ## Implementation Notes

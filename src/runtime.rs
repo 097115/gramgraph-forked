@@ -218,24 +218,102 @@ fn build_x_scale(spec: &PlotSpec, csv_data: &CsvData, scale_type: ScaleType) -> 
     }
 }
 
-/// Build y-axis scale from spec and data (always continuous for now)
-fn build_y_scale(spec: &PlotSpec, csv_data: &CsvData) -> Result<Scale> {
-    let mut all_y = Vec::new();
+/// Calculate stacked bar heights per category
+/// Returns a Vec of the maximum stacked height for each category
+fn calculate_stacked_bar_heights(spec: &PlotSpec, csv_data: &CsvData) -> Result<Vec<f64>> {
+    use crate::parser::ast::BarPosition;
+    use std::collections::HashMap;
+
+    let mut category_totals: HashMap<String, f64> = HashMap::new();
 
     for layer in &spec.layers {
-        let resolved = resolve_layer_aesthetics(layer, &spec.aesthetics)?;
+        if let Layer::Bar(bar_layer) = layer {
+            if matches!(bar_layer.position, BarPosition::Stack) {
+                let resolved = resolve_layer_aesthetics(layer, &spec.aesthetics)?;
 
-        // Extract all y values (grouping doesn't affect y-range calculation)
-        let y_selector = csv_reader::parse_column_selector(&resolved.y_col);
-        match csv_reader::extract_column(csv_data, y_selector) {
-            Ok((_, y_vals)) => all_y.extend(y_vals),
-            Err(e) => {
-                return Err(anyhow!("Failed to extract y column '{}': {}", resolved.y_col, e));
+                // Check if grouped by color
+                if let Some(group_col) = resolved.color_mapping.as_ref() {
+                    // Grouped stacked bars - sum across groups for each category
+                    let (categories, groups) = extract_grouped_categorical_data(
+                        csv_data,
+                        &resolved.x_col,
+                        &resolved.y_col,
+                        group_col
+                    )?;
+
+                    for (cat_idx, cat) in categories.iter().enumerate() {
+                        let total: f64 = groups.iter()
+                            .map(|(_, y_values)| y_values.get(cat_idx).copied().unwrap_or(0.0))
+                            .sum();
+                        *category_totals.entry(cat.clone()).or_insert(0.0) += total;
+                    }
+                } else {
+                    // Non-grouped stacked bars
+                    let x_selector = csv_reader::parse_column_selector(&resolved.x_col);
+                    let (_, x_categories) = csv_reader::extract_column_as_string(csv_data, x_selector)
+                        .context(format!("Failed to extract x column '{}'", resolved.x_col))?;
+
+                    let y_selector = csv_reader::parse_column_selector(&resolved.y_col);
+                    let (_, y_vals) = csv_reader::extract_column(csv_data, y_selector)
+                        .context(format!("Failed to extract y column '{}'", resolved.y_col))?;
+
+                    for (cat, y) in x_categories.iter().zip(y_vals.iter()) {
+                        *category_totals.entry(cat.clone()).or_insert(0.0) += y;
+                    }
+                }
             }
         }
     }
 
-    Ok(Scale::continuous_from_data(&all_y))
+    Ok(category_totals.values().copied().collect())
+}
+
+/// Build y-axis scale from spec and data (always continuous for now)
+fn build_y_scale(spec: &PlotSpec, csv_data: &CsvData) -> Result<Scale> {
+    use crate::parser::ast::BarPosition;
+
+    // Check if we have any bar layers
+    let has_bars = spec.layers.iter().any(|l| matches!(l, Layer::Bar(_)));
+
+    // Check if we have stacked bars
+    let has_stacked_bars = spec.layers.iter()
+        .filter_map(|l| match l {
+            Layer::Bar(b) => Some(&b.position),
+            _ => None,
+        })
+        .any(|pos| matches!(pos, BarPosition::Stack));
+
+    let y_values = if has_stacked_bars {
+        // For stacked bars, use cumulative heights per category
+        calculate_stacked_bar_heights(spec, csv_data)?
+    } else {
+        // For non-stacked, collect individual y values
+        let mut all_y = Vec::new();
+        for layer in &spec.layers {
+            let resolved = resolve_layer_aesthetics(layer, &spec.aesthetics)?;
+            let y_selector = csv_reader::parse_column_selector(&resolved.y_col);
+            match csv_reader::extract_column(csv_data, y_selector) {
+                Ok((_, y_vals)) => all_y.extend(y_vals),
+                Err(e) => {
+                    return Err(anyhow!("Failed to extract y column '{}': {}", resolved.y_col, e));
+                }
+            }
+        }
+        all_y
+    };
+
+    // For bar charts, always start y-axis at 0
+    if has_bars {
+        let max = y_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let padding = max * 0.05;
+        Ok(Scale {
+            scale_type: ScaleType::Continuous,
+            data_range: DataRange::Numeric(0.0..(max + padding)),
+            coord_range: 0.0..(max + padding),
+        })
+    } else {
+        Ok(Scale::continuous_from_data(&y_values))
+    }
 }
 
 // =============================================================================

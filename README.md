@@ -44,6 +44,14 @@ cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type)
 
 ![Stacked Bar Chart](examples/bar_stack.png)
 
+### Faceted Plot with Color Grouping
+
+```bash
+cat examples/regional_sales.csv | gramgraph 'aes(x: time, y: sales, color: product) | line() | facet_wrap(by: region)' > examples/facets.png
+```
+
+![Faceted Plot](examples/facets.png)
+
 ## Installation
 
 ```bash

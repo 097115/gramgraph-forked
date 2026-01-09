@@ -30,6 +30,8 @@ This architecture enables powerful, declarative chart specifications with clean 
 - **Automatic Legends**: Generated for grouped visualizations
 - **Color Palettes**: Category10 scheme with 10 distinct colors
 - **Flexible Parsing**: Order-independent named arguments in DSL
+- **Data Abstraction**: Internal `PlotData` type for flexible data input (e.g., CSV, JSON)
+- **Render Options**: Configurable output dimensions (`--width`, `--height`) and format (`--format png | svg`)
 
 ### 🚀 Coming Soon
 
@@ -43,7 +45,7 @@ This architecture enables powerful, declarative chart specifications with clean 
 GramGraph employs a strict **Grammar of Graphics** pipeline, moving data through five distinct phases:
 
 ```
-CSV Data → Resolution → Transformation → Scaling → Compilation → Rendering → PNG
+CSV/JSON Data → Resolution → Transformation → Scaling → Compilation → Rendering → PNG/SVG
 ```
 
 ### Core Principles
@@ -72,12 +74,12 @@ aes(x: column, y: column) | geom() | labs() | theme() | scales()
 
 **Simple line chart:**
 ```bash
-cat data.csv | gramgraph 'aes(x: time, y: temperature) | line()'
+cat data.csv | gramgraph 'aes(x: time, y: temperature) | line()' --width 1024 --height 768 --format svg
 ```
 
 **Histogram with Theme:**
 ```bash
-cat data.csv | gramgraph 'aes(x: value) | histogram(bins: 20) | labs(title: "Distribution") | theme_minimal()'
+cat data.csv | gramgraph 'aes(x: value) | histogram(bins: 20) | labs(title: "Distribution") | theme_minimal()' --width 800 --height 600 --format png
 ```
 
 **Horizontal Bar Chart (Coord Flip):**
@@ -139,6 +141,11 @@ Creates small multiples.
 - `ncol: n`
 - `scales: "fixed" | "free" | "free_x" | "free_y"`
 
+#### CLI Arguments
+- `--width <pixels>`: Sets the output width in pixels (default: 800).
+- `--height <pixels>`: Sets the output height in pixels (default: 600).
+- `--format <png|svg>`: Sets the output format (default: png).
+
 ## Module Structure
 
 ```
@@ -146,6 +153,7 @@ src/
 ├── main.rs              # CLI entry point
 ├── lib.rs               # Library export
 ├── csv_reader.rs        # CSV parsing
+├── data.rs              # PlotData abstraction (CSV/JSON input)
 ├── ir.rs                # Intermediate Representation (Data Contracts)
 ├── resolve.rs           # Phase 1: Aesthetic Resolution
 ├── transform.rs         # Phase 2: Data Transformation (Stats/Position/Sort)

@@ -9,6 +9,7 @@ pub fn compile_geometry(
     spec: &ResolvedSpec
 ) -> Result<SceneGraph> {
     let mut panels = Vec::new();
+    let is_flipped = matches!(spec.coord, Some(crate::parser::ast::CoordSystem::Flip));
 
     // Iterate panels (zipped with scales)
     for (panel_data, panel_scales) in data.panels.into_iter().zip(scales.panels.into_iter()) {
@@ -33,7 +34,7 @@ pub fn compile_geometry(
                 match &group.style {
                     RenderStyle::Line(style) => {
                         let points: Vec<(f64, f64)> = group.x.iter().zip(group.y.iter())
-                            .map(|(&x, &y)| (x, y))
+                            .map(|(&x, &y)| if is_flipped { (y, x) } else { (x, y) })
                             .collect();
                         commands.push(DrawCommand::DrawLine {
                             points,
@@ -43,7 +44,7 @@ pub fn compile_geometry(
                     }
                     RenderStyle::Point(style) => {
                         let points: Vec<(f64, f64)> = group.x.iter().zip(group.y.iter())
-                            .map(|(&x, &y)| (x, y))
+                            .map(|(&x, &y)| if is_flipped { (y, x) } else { (x, y) })
                             .collect();
                         commands.push(DrawCommand::DrawPoint {
                             points,
@@ -80,6 +81,12 @@ pub fn compile_geometry(
                             let tl = (x_final - half_width, y_top);
                             let br = (x_final + half_width, y_bottom);
                             
+                            let (tl, br) = if is_flipped {
+                                ((tl.1, tl.0), (br.1, br.0))
+                            } else {
+                                (tl, br)
+                            };
+
                             commands.push(DrawCommand::DrawRect {
                                 tl,
                                 br,
@@ -87,6 +94,30 @@ pub fn compile_geometry(
                                 legend: if i == 0 { Some(group.key.clone()) } else { None }, // Only legend once per group
                             });
                         }
+                    }
+                    RenderStyle::Ribbon(style) => {
+                        // Construct Polygon: Trace y_max forward, then y_min backward
+                        let mut points = Vec::with_capacity(group.x.len() * 2);
+                        
+                        // Forward pass: y_max
+                        for i in 0..group.x.len() {
+                            let x = group.x[i];
+                            let y = group.y_max[i];
+                            points.push(if is_flipped { (y, x) } else { (x, y) });
+                        }
+                        
+                        // Backward pass: y_min
+                        for i in (0..group.x.len()).rev() {
+                            let x = group.x[i];
+                            let y = group.y_min[i];
+                            points.push(if is_flipped { (y, x) } else { (x, y) });
+                        }
+
+                        commands.push(DrawCommand::DrawPolygon {
+                            points,
+                            style: style.clone(),
+                            legend: Some(group.key.clone()),
+                        });
                     }
                 }
             }
@@ -100,13 +131,21 @@ pub fn compile_geometry(
         // Determine Row/Col
         let row = panel_data.index / data.facet_layout.ncol;
         let col = panel_data.index % data.facet_layout.ncol;
+        
+        let (x_scale, y_scale) = if is_flipped {
+            (panel_scales.y, panel_scales.x)
+        } else {
+            (panel_scales.x, panel_scales.y)
+        };
 
         panels.push(PanelScene {
             row,
             col,
             title,
-            x_scale: panel_scales.x,
-            y_scale: panel_scales.y,
+            x_label: spec.labels.x.clone(),
+            y_label: spec.labels.y.clone(),
+            x_scale,
+            y_scale,
             commands,
         });
     }
@@ -115,7 +154,8 @@ pub fn compile_geometry(
         width: 800, // Default, can be overridden or passed in
         height: 600,
         panels,
-        title: spec.facet.as_ref().map(|_| "".to_string()), // If faceted, main title is empty or needs separate field
+        labels: spec.labels.clone(),
+        theme: spec.theme.clone(),
     })
 }
 
@@ -136,6 +176,8 @@ mod tests {
                         x: vec![0.0, 1.0],
                         y: vec![10.0, 20.0],
                         y_start: vec![0.0, 0.0],
+                        y_min: vec![0.0, 0.0],
+                        y_max: vec![10.0, 20.0],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],
@@ -156,11 +198,17 @@ mod tests {
                 original_layer: Layer::Line(LineLayer::default()),
                 aesthetics: ResolvedAesthetics {
                     x_col: "x".to_string(),
-                    y_col: "y".to_string(),
+                    y_col: Some("y".to_string()),
+                    ymin_col: None, ymax_col: None,
                     color: None, size: None, shape: None, alpha: None
                 },
             }],
             facet: None,
+            coord: None,
+            labels: crate::parser::ast::Labels::default(),
+            theme: crate::parser::ast::Theme::default(),
+            x_scale_spec: None,
+            y_scale_spec: None,
         };
         
         (render_data, scales, spec)

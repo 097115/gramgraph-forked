@@ -68,6 +68,46 @@ cat examples/regional_sales.csv | gramgraph 'aes(x: time, y: sales, color: produ
 
 ![Faceted Plot](examples/facets.png)
 
+### Histogram with Theme
+
+```bash
+cat examples/distribution.csv | gramgraph 'aes(x: value) | histogram(bins: 25) | labs(title: "Distribution Analysis", x: "Value", y: "Count") | theme_minimal()' > examples/histogram.png
+```
+
+![Histogram](examples/histogram.png)
+
+### Horizontal Bar Chart (Coord Flip)
+
+```bash
+cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type) | bar(position: "dodge") | coord_flip() | labs(title: "Financials (Horizontal)")' > examples/coord_flip.png
+```
+
+![Horizontal Bar Chart](examples/coord_flip.png)
+
+### Ribbon Chart
+
+```bash
+cat examples/ribbon_data.csv | gramgraph 'aes(x: x, y: y, ymin: lower, ymax: upper) | ribbon(color: "blue", alpha: 0.3) | line(color: "blue") | labs(title: "Model Prediction")' > examples/ribbon.png
+```
+
+![Ribbon Chart](examples/ribbon.png)
+
+### Smoothing (Linear Regression)
+
+```bash
+cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(alpha: 0.5) | smooth() | labs(title: "Linear Fit")' > examples/smooth.png
+```
+
+![Smoothing](examples/smooth.png)
+
+### Reverse Scale
+
+```bash
+cat examples/timeseries.csv | gramgraph 'aes(x: time, y: value, color: series) | line() | labs(title: "Reverse Time Axis") | scale_x_reverse()' > examples/scale_reverse.png
+```
+
+![Reverse Scale](examples/scale_reverse.png)
+
 ## Installation
 
 ```bash

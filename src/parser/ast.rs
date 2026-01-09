@@ -1,5 +1,62 @@
 // Abstract Syntax Tree for Grammar of Graphics DSL
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum CoordSystem {
+    Cartesian,
+    Flip,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LegendPosition {
+    Right,
+    Left,
+    Top,
+    Bottom,
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Theme {
+    pub background_color: Option<String>,
+    pub grid_visible: bool,
+    pub font_family: Option<String>,
+    pub legend_position: LegendPosition,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Theme {
+            background_color: None,
+            grid_visible: true,
+            font_family: None,
+            legend_position: LegendPosition::Right,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScaleType {
+    Linear,
+    Log10,
+    Sqrt,
+    Reverse,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AxisScale {
+    pub scale_type: ScaleType,
+    pub limits: Option<(f64, f64)>, // Custom min/max
+}
+
+impl Default for AxisScale {
+    fn default() -> Self {
+        AxisScale {
+            scale_type: ScaleType::Linear,
+            limits: None,
+        }
+    }
+}
+
 /// Complete plot specification
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSpec {
@@ -7,6 +64,10 @@ pub struct PlotSpec {
     pub layers: Vec<Layer>,
     pub labels: Option<Labels>,
     pub facet: Option<Facet>,
+    pub coord: Option<CoordSystem>,
+    pub theme: Option<Theme>,
+    pub x_scale: Option<AxisScale>,
+    pub y_scale: Option<AxisScale>,
 }
 
 impl PlotSpec {
@@ -22,7 +83,7 @@ pub struct Aesthetics {
     /// Column name for x-axis
     pub x: String,
     /// Column name for y-axis
-    pub y: String,
+    pub y: Option<String>,
     /// Optional column name for color grouping
     pub color: Option<String>,
     /// Optional column name for size grouping
@@ -31,6 +92,10 @@ pub struct Aesthetics {
     pub shape: Option<String>,
     /// Optional column name for alpha grouping
     pub alpha: Option<String>,
+    /// Optional column name for ymin
+    pub ymin: Option<String>,
+    /// Optional column name for ymax
+    pub ymax: Option<String>,
 }
 
 /// Represents either a fixed literal value or a data-driven column mapping
@@ -42,13 +107,29 @@ pub enum AestheticValue<T> {
     Mapped(String),
 }
 
+/// Statistical transformation to apply
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stat {
+    Identity,
+    Bin { bins: usize },
+    Count,
+    Smooth { method: String },
+}
+
+impl Default for Stat {
+    fn default() -> Self {
+        Stat::Identity
+    }
+}
+
 /// Individual visualization layer
 #[derive(Debug, Clone, PartialEq)]
 pub enum Layer {
     Line(LineLayer),
     Point(PointLayer),
     Bar(BarLayer),
-    // Future: Area, Ribbon, Histogram, etc.
+    Ribbon(RibbonLayer),
+    // Future: Area, Histogram, etc.
 }
 
 impl Layer {
@@ -56,11 +137,21 @@ impl Layer {
     pub fn requires_categorical_x(&self) -> bool {
         matches!(self, Layer::Bar(_))
     }
+
+    pub fn stat(&self) -> &Stat {
+        match self {
+            Layer::Line(l) => &l.stat,
+            Layer::Point(p) => &p.stat,
+            Layer::Bar(b) => &b.stat,
+            Layer::Ribbon(r) => &r.stat,
+        }
+    }
 }
 
 /// Line geometry layer
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LineLayer {
+    pub stat: Stat,
     // Aesthetic overrides (None = inherit from global)
     pub x: Option<String>,
     pub y: Option<String>,
@@ -75,6 +166,7 @@ pub struct LineLayer {
 /// Point geometry layer
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PointLayer {
+    pub stat: Stat,
     // Aesthetic overrides
     pub x: Option<String>,
     pub y: Option<String>,
@@ -89,6 +181,7 @@ pub struct PointLayer {
 /// Bar geometry layer
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BarLayer {
+    pub stat: Stat,
     // Aesthetic overrides
     pub x: Option<String>,
     pub y: Option<String>,
@@ -100,6 +193,20 @@ pub struct BarLayer {
 
     // Positioning strategy
     pub position: BarPosition,
+}
+
+/// Ribbon geometry layer
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RibbonLayer {
+    pub stat: Stat,
+    // Aesthetic overrides
+    pub x: Option<String>,
+    pub ymin: Option<String>,
+    pub ymax: Option<String>,
+
+    // Visual properties
+    pub color: Option<AestheticValue<String>>, // Used for fill
+    pub alpha: Option<AestheticValue<f64>>,
 }
 
 /// Bar positioning modes (how bars are arranged)
@@ -117,11 +224,13 @@ impl Default for BarPosition {
 }
 
 /// Plot labels (title, axes)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Labels {
     pub title: Option<String>,
-    pub x_label: Option<String>,
-    pub y_label: Option<String>,
+    pub subtitle: Option<String>,
+    pub x: Option<String>, // Renamed from x_label for ggplot2 parity
+    pub y: Option<String>, // Renamed from y_label
+    pub caption: Option<String>,
 }
 
 /// Facet specification for creating subplot grids

@@ -1,9 +1,9 @@
 use anyhow::Result;
-use crate::ir::{RenderData, ScaleSystem, PanelScales, Scale, ResolvedFacet};
-use crate::parser::ast::FacetScales;
+use crate::ir::{RenderData, ScaleSystem, PanelScales, Scale, ResolvedSpec};
+use crate::parser::ast::{FacetScales, ScaleType};
 
 /// Build the scale system for the plot
-pub fn build_scales(data: &RenderData, facet_config: Option<&ResolvedFacet>) -> Result<ScaleSystem> {
+pub fn build_scales(data: &RenderData, spec: &ResolvedSpec) -> Result<ScaleSystem> {
     // 1. Calculate raw ranges per panel
     let mut panel_raw_ranges = Vec::new();
     for panel in &data.panels {
@@ -13,7 +13,7 @@ pub fn build_scales(data: &RenderData, facet_config: Option<&ResolvedFacet>) -> 
     }
 
     // 2. Determine Scale Sharing Logic
-    let scales_mode = facet_config.map(|f| &f.scales).unwrap_or(&FacetScales::Fixed);
+    let scales_mode = spec.facet.as_ref().map(|f| &f.scales).unwrap_or(&FacetScales::Fixed);
 
     // 3. Resolve final domains
     let mut final_scales = Vec::new();
@@ -32,43 +32,57 @@ pub fn build_scales(data: &RenderData, facet_config: Option<&ResolvedFacet>) -> 
     };
 
     for (x_local, y_local) in &panel_raw_ranges {
-        let x_domain = match scales_mode {
+        let x_mm = match scales_mode {
             FacetScales::Fixed | FacetScales::FreeY => global_x.clone(),
             _ => x_local.clone(),
         };
 
-        let y_domain = match scales_mode {
+        let y_mm = match scales_mode {
             FacetScales::Fixed | FacetScales::FreeX => global_y.clone(),
             _ => y_local.clone(),
         };
 
         // 4. Construct Scale objects
         // X-Axis
-        let x_scale = if x_domain.is_categorical {
+        let x_scale = if x_mm.is_categorical {
             // Categorical Scale
-            let n = x_domain.categories.len() as f64;
+            let n = x_mm.categories.len() as f64;
             Scale {
-                domain: (0.0, n), // Not strictly used for categorical mapping which uses indices, but good metadata
-                range: (-0.5, n - 0.5), // Standard bar chart alignment
+                domain: (0.0, n),
+                range: if let Some(s) = &spec.x_scale_spec {
+                    if matches!(s.scale_type, ScaleType::Reverse) { (n - 0.5, -0.5) } else { (-0.5, n - 0.5) }
+                } else { (-0.5, n - 0.5) },
                 is_categorical: true,
-                categories: x_domain.categories,
+                categories: x_mm.categories,
             }
         } else {
             // Continuous Scale
-            let (min, max) = pad_range(x_domain.min, x_domain.max);
+            let (mut min, mut max) = if let Some(s) = &spec.x_scale_spec {
+                if let Some((lmin, lmax)) = s.limits { (lmin, lmax) }
+                else { pad_range(x_mm.min, x_mm.max) }
+            } else { pad_range(x_mm.min, x_mm.max) };
+
             Scale {
                 domain: (min, max),
-                range: (min, max), // 1:1 mapping in data space
+                range: if let Some(s) = &spec.x_scale_spec {
+                    if matches!(s.scale_type, ScaleType::Reverse) { (max, min) } else { (min, max) }
+                } else { (min, max) },
                 is_categorical: false,
                 categories: Vec::new(),
             }
         };
 
-        // Y-Axis (Always continuous for now)
-        let (min, max) = pad_range(y_domain.min, y_domain.max);
+        // Y-Axis
+        let (mut min, mut max) = if let Some(s) = &spec.y_scale_spec {
+            if let Some((lmin, lmax)) = s.limits { (lmin, lmax) }
+            else { pad_range(y_mm.min, y_mm.max) }
+        } else { pad_range(y_mm.min, y_mm.max) };
+
         let y_scale = Scale {
             domain: (min, max),
-            range: (min, max),
+            range: if let Some(s) = &spec.y_scale_spec {
+                if matches!(s.scale_type, ScaleType::Reverse) { (max, min) } else { (min, max) }
+            } else { (min, max) },
             is_categorical: false,
             categories: Vec::new(),
         };
@@ -207,6 +221,8 @@ mod tests {
                         x,
                         y,
                         y_start: vec![],
+                        y_min: vec![],
+                        y_max: vec![],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],
@@ -216,10 +232,23 @@ mod tests {
         }
     }
 
+    fn make_resolved_spec() -> ResolvedSpec {
+        ResolvedSpec {
+            layers: vec![],
+            facet: None,
+            coord: None,
+            labels: crate::parser::ast::Labels::default(),
+            theme: crate::parser::ast::Theme::default(),
+            x_scale_spec: None,
+            y_scale_spec: None,
+        }
+    }
+
     #[test]
     fn test_scale_continuous() {
         let data = make_render_data(vec![0.0, 10.0], vec![0.0, 100.0]);
-        let scales = build_scales(&data, None).unwrap();
+        let spec = make_resolved_spec();
+        let scales = build_scales(&data, &spec).unwrap();
         
         assert_eq!(scales.panels.len(), 1);
         let panel = &scales.panels[0];
@@ -233,7 +262,8 @@ mod tests {
     #[test]
     fn test_scale_single_point() {
         let data = make_render_data(vec![5.0], vec![5.0]);
-        let scales = build_scales(&data, None).unwrap();
+        let spec = make_resolved_spec();
+        let scales = build_scales(&data, &spec).unwrap();
         
         let panel = &scales.panels[0];
         assert_eq!(panel.x.domain.0, 4.0);
@@ -246,7 +276,8 @@ mod tests {
         // Modify to simulate categorical
         data.panels[0].layers[0].groups[0].x_categories = Some(vec!["A".to_string(), "B".to_string()]);
         
-        let scales = build_scales(&data, None).unwrap();
+        let spec = make_resolved_spec();
+        let scales = build_scales(&data, &spec).unwrap();
         let panel = &scales.panels[0];
         
         assert!(panel.x.is_categorical);

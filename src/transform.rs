@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use crate::csv_reader::CsvData;
 use crate::ir::{RenderData, PanelData, LayerData, GroupData, FacetLayout, RenderStyle};
 use crate::ir::{ResolvedSpec, ResolvedLayer, ResolvedAesthetics, ResolvedFacet};
-use crate::parser::ast::{Layer, BarPosition};
-use crate::graph::{LineStyle, PointStyle, BarStyle};
+use crate::parser::ast::{Layer, BarPosition, Stat};
+use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle};
 use crate::palette::{ColorPalette, SizePalette, ShapePalette};
 
 /// Main entry point: Transform resolved spec and CSV data into renderable data
@@ -118,13 +118,16 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
         .or(aes.alpha.as_ref());
 
     // 2. Extract Data (Grouped)
-    // We return a map: GroupKey -> (RawX, RawY)
+    // We return a map: GroupKey -> (RawX, RawY, RawYMin, RawYMax)
     // RawX is String to handle both numeric and categorical initially
-    let mut raw_groups: HashMap<String, (Vec<String>, Vec<f64>)> = HashMap::new();
+    let mut raw_groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)> = HashMap::new();
     
     // Column Indices
     let x_idx = find_col_index(&csv_data.headers, &aes.x_col)?;
-    let y_idx = find_col_index(&csv_data.headers, &aes.y_col)?;
+    let y_idx = if let Some(y) = &aes.y_col { Some(find_col_index(&csv_data.headers, y)?) } else { None };
+    let ymin_idx = if let Some(col) = &aes.ymin_col { Some(find_col_index(&csv_data.headers, col)?) } else { None };
+    let ymax_idx = if let Some(col) = &aes.ymax_col { Some(find_col_index(&csv_data.headers, col)?) } else { None };
+
     let group_idx = if let Some(g) = group_col {
         Some(find_col_index(&csv_data.headers, g)?)
     } else {
@@ -133,7 +136,13 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
 
     for row in &csv_data.rows {
         let x_str = row[x_idx].clone();
-        let y_val = row[y_idx].parse::<f64>().context(format!("Failed to parse Y value '{}'", row[y_idx]))?;
+        let y_val = if let Some(idx) = y_idx { 
+            row[idx].parse::<f64>().context(format!("Failed to parse Y value '{}'", row[idx]))?
+        } else { 
+            0.0 // Default for histogram if not provided
+        };
+        let ymin_val = if let Some(idx) = ymin_idx { row[idx].parse::<f64>().unwrap_or(0.0) } else { 0.0 };
+        let ymax_val = if let Some(idx) = ymax_idx { row[idx].parse::<f64>().unwrap_or(0.0) } else { 0.0 };
         
         let group_key = if let Some(idx) = group_idx {
             row[idx].clone()
@@ -141,16 +150,21 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
             "default".to_string()
         };
 
-        let entry = raw_groups.entry(group_key).or_insert_with(|| (Vec::new(), Vec::new()));
+        let entry = raw_groups.entry(group_key).or_insert_with(|| (Vec::new(), Vec::new(), Vec::new(), Vec::new()));
         entry.0.push(x_str);
         entry.1.push(y_val);
+        entry.2.push(ymin_val);
+        entry.3.push(ymax_val);
     }
+
+    // Apply Statistics
+    let raw_groups = apply_statistics(raw_groups, layer_spec.original_layer.stat())?;
 
     // 3. Determine X-Axis Type (Numeric vs Categorical)
     // Logic: If ALL x values in this layer can be parsed as float, it's numeric.
     // UNLESS it's a Bar chart, which forces categorical.
     let is_bar = matches!(layer_spec.original_layer, Layer::Bar(_));
-    let all_x_strings: Vec<&String> = raw_groups.values().flat_map(|(x, _)| x.iter()).collect();
+    let all_x_strings: Vec<&String> = raw_groups.values().flat_map(|(x, _, _, _)| x.iter()).collect();
     let all_numeric = all_x_strings.iter().all(|s| s.parse::<f64>().is_ok());
     
     let use_categorical = is_bar || !all_numeric;
@@ -169,7 +183,18 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
             unique_cats.insert((*s).clone());
         }
         category_order = unique_cats.into_iter().collect();
-        category_order.sort();
+        
+        // Try to sort numerically if possible
+        let all_numeric_cats = category_order.iter().all(|s| s.parse::<f64>().is_ok());
+        if all_numeric_cats {
+            category_order.sort_by(|a, b| {
+                let fa = a.parse::<f64>().unwrap();
+                let fb = b.parse::<f64>().unwrap();
+                fa.partial_cmp(&fb).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        } else {
+            category_order.sort();
+        }
         
         for (i, cat) in category_order.iter().enumerate() {
             x_category_map.insert(cat.clone(), i as f64);
@@ -194,14 +219,18 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
 
     // Iterate groups in defined order (important for stacking order)
     for key in sorted_group_keys {
-        let (raw_x, raw_y) = raw_groups.get(&key).unwrap();
+        let (raw_x, raw_y, raw_ymin, raw_ymax) = raw_groups.get(&key).unwrap();
         
         let mut x_floats = Vec::with_capacity(raw_x.len());
         let mut y_starts = Vec::with_capacity(raw_x.len());
         let mut y_ends = Vec::with_capacity(raw_x.len());
+        let mut y_mins = Vec::with_capacity(raw_x.len());
+        let mut y_maxs = Vec::with_capacity(raw_x.len());
 
         for (i, x_s) in raw_x.iter().enumerate() {
             let y_val = raw_y[i];
+            let raw_min = raw_ymin[i];
+            let raw_max = raw_ymax[i];
             
             // Resolve X
             let x_val = if use_categorical {
@@ -211,22 +240,26 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
             };
             x_floats.push(x_val);
 
-            // Resolve Y (Stacking)
-            let stack_key = if use_categorical { x_s.clone() } else { x_val.to_string() }; // Rounding risk for floats?
+            // Resolve Y (Stacking and Min/Max)
+            let stack_key = if use_categorical { x_s.clone() } else { x_val.to_string() };
             
-            let y_start = if is_stacked {
-                *stack_offsets.get(&stack_key).unwrap_or(&0.0)
+            let (y_start, y_end, y_min, y_max) = if is_stacked {
+                let start = *stack_offsets.get(&stack_key).unwrap_or(&0.0);
+                let end = start + y_val;
+                stack_offsets.insert(stack_key, end);
+                (start, end, start, end)
+            } else if matches!(layer_spec.original_layer, Layer::Ribbon(_)) {
+                // Ribbon uses raw ymin/ymax
+                (raw_min, raw_max, raw_min, raw_max)
             } else {
-                0.0
+                // Line/Point/Bar(unstacked)
+                (0.0, y_val, 0.0, y_val)
             };
-            let y_end = y_start + y_val;
-
-            if is_stacked {
-                stack_offsets.insert(stack_key, y_end);
-            }
             
             y_starts.push(y_start);
-            y_ends.push(y_end); // This is the "top" of the geometry
+            y_ends.push(y_end);
+            y_mins.push(y_min);
+            y_maxs.push(y_max);
         }
 
         // Build Style
@@ -235,8 +268,10 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
         groups.push(GroupData {
             key: key.clone(),
             x: x_floats,
-            y: y_ends, // For line/point this is just the value. For bar it's top.
+            y: y_ends, // Main value
             y_start: y_starts,
+            y_min: y_mins,
+            y_max: y_maxs,
             x_categories: if use_categorical { Some(category_order.clone()) } else { None },
             style,
         });
@@ -244,7 +279,6 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
 
     Ok(LayerData { groups })
 }
-
 fn find_col_index(headers: &[String], name: &str) -> Result<usize> {
     headers.iter()
         .position(|h| h.eq_ignore_ascii_case(name))
@@ -324,7 +358,151 @@ fn build_style(
             width: pick_size(&b.width),
             alpha: pick_alpha(&b.alpha),
         }),
+        Layer::Ribbon(r) => RenderStyle::Ribbon(RibbonStyle {
+            color: pick_color(&r.color),
+            alpha: pick_alpha(&r.alpha),
+        }),
     }
+}
+
+fn apply_statistics(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>, 
+    stat: &Stat
+) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+    match stat {
+        Stat::Identity => Ok(groups),
+        Stat::Bin { bins } => compute_bin_stat(groups, *bins),
+        Stat::Count => compute_count_stat(groups),
+        Stat::Smooth { method } => compute_smooth_stat(groups, method),
+    }
+}
+
+fn compute_count_stat(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>
+) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+    let mut new_groups = HashMap::new();
+    
+    for (key, (x_strs, _, _, _)) in groups {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for s in x_strs {
+            *counts.entry(s).or_default() += 1;
+        }
+        
+        let mut keys: Vec<String> = counts.keys().cloned().collect();
+        keys.sort();
+        
+        let mut new_x = Vec::new();
+        let mut new_y = Vec::new();
+        let mut new_ymin = Vec::new();
+        let mut new_ymax = Vec::new();
+        
+        for k in keys {
+            let count = counts[&k] as f64;
+            new_x.push(k);
+            new_y.push(count);
+            new_ymin.push(0.0);
+            new_ymax.push(count);
+        }
+        
+        new_groups.insert(key, (new_x, new_y, new_ymin, new_ymax));
+    }
+    
+    Ok(new_groups)
+}
+
+fn compute_smooth_stat(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
+    _method: &str
+) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+    let mut new_groups = HashMap::new();
+    
+    for (key, (x_strs, y_vals, _, _)) in groups {
+        // Simple Linear Regression
+        let mut x_floats = Vec::new();
+        for s in &x_strs {
+            x_floats.push(s.parse::<f64>().map_err(|_| anyhow!("Stat 'smooth' requires numeric x data"))?);
+        }
+        
+        if x_floats.len() < 2 { continue; }
+        
+        let n = x_floats.len() as f64;
+        let sum_x: f64 = x_floats.iter().sum();
+        let sum_y: f64 = y_vals.iter().sum();
+        let sum_xx: f64 = x_floats.iter().map(|&x| x * x).sum();
+        let sum_xy: f64 = x_floats.iter().zip(y_vals.iter()).map(|(&x, &y)| x * y).sum();
+        
+        let slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+        let intercept = (sum_y - slope * sum_x) / n;
+        
+        // Generate trend line points (min and max X)
+        let min_x = x_floats.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let max_x = x_floats.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        
+        let new_x = vec![min_x.to_string(), max_x.to_string()];
+        let new_y = vec![slope * min_x + intercept, slope * max_x + intercept];
+        
+        new_groups.insert(key, (new_x, new_y.clone(), new_y.clone(), new_y));
+    }
+    
+    Ok(new_groups)
+}
+
+fn compute_bin_stat(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
+    bin_count: usize
+) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+    // 1. Collect all X values to determine range
+    let mut all_values = Vec::new();
+    for (x_strs, _, _, _) in groups.values() {
+        for s in x_strs {
+            let v = s.parse::<f64>().map_err(|_| anyhow!("Stat 'bin' requires numeric x data"))?;
+            all_values.push(v);
+        }
+    }
+    
+    if all_values.is_empty() { return Ok(groups); }
+
+    let min = all_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let max = all_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+    
+    // Add small buffer or handle 0 range
+    let range = max - min;
+    let width = if range == 0.0 { 1.0 } else { range / bin_count as f64 };
+    
+    let mut new_groups = HashMap::new();
+    
+    for (key, (x_strs, _, _, _)) in groups {
+        let mut bins: HashMap<isize, usize> = HashMap::new();
+        
+        for s in x_strs {
+             // We already checked they are numeric
+             let v = s.parse::<f64>().unwrap();
+             let bin_idx = ((v - min) / width).floor() as isize;
+             *bins.entry(bin_idx).or_default() += 1;
+        }
+        
+        // Convert bins back to (X, Y)
+        let mut bin_indices: Vec<isize> = bins.keys().cloned().collect();
+        bin_indices.sort();
+        
+        let mut new_x = Vec::new();
+        let mut new_y = Vec::new();
+        let mut new_ymin = Vec::new();
+        let mut new_ymax = Vec::new();
+        
+        for idx in bin_indices {
+            let center = min + (idx as f64 * width) + (width / 2.0);
+            let count = bins[&idx] as f64;
+            new_x.push(format!("{:.2}", center));
+            new_y.push(count);
+            new_ymin.push(0.0);
+            new_ymax.push(count);
+        }
+        
+        new_groups.insert(key, (new_x, new_y, new_ymin, new_ymax));
+    }
+    
+    Ok(new_groups)
 }
 
 #[cfg(test)]
@@ -349,7 +527,9 @@ mod tests {
                 original_layer: Layer::Line(LineLayer::default()),
                 aesthetics: ResolvedAesthetics {
                     x_col: "x".to_string(),
-                    y_col: "y".to_string(),
+                    y_col: Some("y".to_string()),
+                    ymin_col: None,
+                    ymax_col: None,
                     color: Some("cat".to_string()),
                     size: None,
                     shape: None,
@@ -357,6 +537,11 @@ mod tests {
                 },
             }],
             facet: None,
+            coord: None,
+            labels: crate::parser::ast::Labels::default(),
+            theme: crate::parser::ast::Theme::default(),
+            x_scale_spec: None,
+            y_scale_spec: None,
         }
     }
 

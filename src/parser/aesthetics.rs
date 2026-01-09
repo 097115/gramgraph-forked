@@ -30,6 +30,8 @@ pub fn parse_aesthetics(input: &str) -> IResult<&str, Aesthetics> {
     let mut size = None;
     let mut shape = None;
     let mut alpha = None;
+    let mut ymin = None;
+    let mut ymax = None;
 
     for (key, value) in args {
         match key.as_str() {
@@ -39,6 +41,8 @@ pub fn parse_aesthetics(input: &str) -> IResult<&str, Aesthetics> {
             "size" => size = Some(value),
             "shape" => shape = Some(value),
             "alpha" => alpha = Some(value),
+            "ymin" => ymin = Some(value),
+            "ymax" => ymax = Some(value),
             _ => {} // Ignore unknown keys
         }
     }
@@ -50,14 +54,10 @@ pub fn parse_aesthetics(input: &str) -> IResult<&str, Aesthetics> {
             nom::error::ErrorKind::Tag,
         ))
     })?;
-    let y = y.ok_or_else(|| {
-        nom::Err::Error(nom::error::Error::new(
-            input,
-            nom::error::ErrorKind::Tag,
-        ))
-    })?;
+    
+    // y is now optional (e.g. for histogram)
 
-    Ok((input, Aesthetics { x, y, color, size, shape, alpha }))
+    Ok((input, Aesthetics { x, y, color, size, shape, alpha, ymin, ymax }))
 }
 
 /// Parse a single aesthetic argument (key: value)
@@ -78,7 +78,7 @@ mod tests {
         assert!(result.is_ok());
         let (_, aes) = result.unwrap();
         assert_eq!(aes.x, "time");
-        assert_eq!(aes.y, "temp");
+        assert_eq!(aes.y, Some("temp".to_string()));
     }
 
     #[test]
@@ -87,7 +87,7 @@ mod tests {
         assert!(result.is_ok());
         let (_, aes) = result.unwrap();
         assert_eq!(aes.x, "time");
-        assert_eq!(aes.y, "temp");
+        assert_eq!(aes.y, Some("temp".to_string()));
     }
 
     #[test]
@@ -112,5 +112,13 @@ mod tests {
     fn test_parse_aesthetics_unclosed_paren() {
         // Unclosed parenthesis should fail
         assert!(parse_aesthetics("aes(x: time, y: temp").is_err());
+    }
+
+    #[test]
+    fn test_parse_aesthetics_value_identifier() {
+        let result = parse_aesthetics("aes(x: value)");
+        assert!(result.is_ok());
+        let (_, aes) = result.unwrap();
+        assert_eq!(aes.x, "value");
     }
 }

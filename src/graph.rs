@@ -28,6 +28,13 @@ pub struct BarStyle {
     pub width: Option<f64>,
 }
 
+/// Style configuration for ribbon layers
+#[derive(Debug, Clone, Default)]
+pub struct RibbonStyle {
+    pub color: Option<String>,
+    pub alpha: Option<f64>,
+}
+
 /// The Rendering Backend
 pub struct Canvas;
 
@@ -42,7 +49,8 @@ impl Canvas {
             let root = BitMapBackend::with_buffer(&mut buffer, (width, height))
                 .into_drawing_area();
 
-            root.fill(&WHITE).context("Failed to fill background")?;
+            let bg_color = parse_color(&scene.theme.background_color, WHITE);
+            root.fill(&bg_color).context("Failed to fill background")?;
 
             // Determine Grid Layout
             let max_row = scene.panels.iter().map(|p| p.row).max().unwrap_or(0);
@@ -53,12 +61,17 @@ impl Canvas {
 
             let areas = root.split_evenly((rows, cols));
 
+            // Draw Global Labels (Very basic implementation)
+            if let Some(title) = &scene.labels.title {
+                 root.draw_text(title, &TextStyle::from(("sans-serif", 30).into_font()).color(&BLACK), (10, 10))?;
+            }
+
             for panel in scene.panels {
                 let area_idx = panel.row * cols + panel.col;
                 if area_idx >= areas.len() { continue; }
                 
                 let area = &areas[area_idx];
-                Canvas::draw_panel(area, panel)?;
+                Canvas::draw_panel(area, panel, &scene.theme)?;
             }
             
             root.present().context("Failed to present drawing")?;
@@ -81,7 +94,11 @@ impl Canvas {
         Ok(png_bytes)
     }
 
-    fn draw_panel<DB: DrawingBackend>(area: &DrawingArea<DB, plotters::coord::Shift>, panel: PanelScene) -> Result<()> 
+    fn draw_panel<DB: DrawingBackend>(
+        area: &DrawingArea<DB, plotters::coord::Shift>, 
+        panel: PanelScene,
+        theme: &crate::parser::ast::Theme,
+    ) -> Result<()> 
     where <DB as plotters::prelude::DrawingBackend>::ErrorType: 'static
     {
         let x_range = panel.x_scale.range.0..panel.x_scale.range.1;
@@ -102,25 +119,53 @@ impl Canvas {
         // Configure Mesh & Labels
         let mut mesh = chart.configure_mesh();
         
+        if !theme.grid_visible {
+            mesh.disable_mesh();
+        }
+        
+        if let Some(x_label) = &panel.x_label {
+            mesh.x_desc(x_label);
+        }
+        if let Some(y_label) = &panel.y_label {
+            mesh.y_desc(y_label);
+        }
+        
         // Custom X Labels if categorical
-        let categories = panel.x_scale.categories.clone();
-        let formatter = move |v: &f64| {
+        let categories_x = panel.x_scale.categories.clone();
+        let formatter_x = move |v: &f64| {
             // Check if value is integer (within epsilon)
             if (v - v.round()).abs() > 1e-6 {
                 return "".to_string();
             }
             
             let idx = v.round() as usize;
-            if idx < categories.len() {
-                categories[idx].clone()
+            if idx < categories_x.len() {
+                categories_x[idx].clone()
             } else {
                 "".to_string()
             }
         };
 
         if panel.x_scale.is_categorical {
-            mesh.x_label_formatter(&formatter);
-            // Ideally set ticks at integers, but Plotters auto-ticks are usually fine
+            mesh.x_label_formatter(&formatter_x);
+        }
+
+        // Custom Y Labels if categorical (e.g. coord_flip)
+        let categories_y = panel.y_scale.categories.clone();
+        let formatter_y = move |v: &f64| {
+            if (v - v.round()).abs() > 1e-6 {
+                return "".to_string();
+            }
+            let idx = v.round() as usize;
+            if idx < categories_y.len() {
+                categories_y[idx].clone()
+            } else {
+                "".to_string()
+            }
+        };
+
+        if panel.y_scale.is_categorical {
+            mesh.y_label_formatter(&formatter_y);
         }
         
         mesh.draw().context("Failed to draw mesh")?;
@@ -129,7 +174,7 @@ impl Canvas {
         for cmd in panel.commands {
             match cmd {
                 DrawCommand::DrawLine { points, style, legend } => {
-                    let color = parse_color(&style.color);
+                    let color = parse_color(&style.color, BLUE);
                     let stroke_width = style.width.unwrap_or(2.0) as u32;
                     let alpha = style.alpha.unwrap_or(1.0);
                     let color_style = color.mix(alpha).stroke_width(stroke_width);
@@ -143,7 +188,7 @@ impl Canvas {
                     }
                 }
                 DrawCommand::DrawPoint { points, style, legend } => {
-                    let color = parse_color(&style.color);
+                    let color = parse_color(&style.color, BLUE);
                     let size = style.size.unwrap_or(3.0) as i32;
                     let alpha = style.alpha.unwrap_or(1.0);
                     let color_style = color.mix(alpha).filled();
@@ -158,7 +203,7 @@ impl Canvas {
                     }
                 }
                 DrawCommand::DrawRect { tl, br, style, legend } => {
-                    let color = parse_color(&style.color);
+                    let color = parse_color(&style.color, BLUE);
                     let alpha = style.alpha.unwrap_or(1.0);
                     let color_style = color.mix(alpha).filled();
 
@@ -167,6 +212,21 @@ impl Canvas {
                         color_style
                     ))).context("Failed to draw rect")?;
                     
+                    if let Some(label) = legend {
+                        series.label(label)
+                            .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 15, y + 5)], color.mix(alpha).filled()));
+                    }
+                }
+                DrawCommand::DrawPolygon { points, style, legend } => {
+                    let color = parse_color(&style.color, BLUE);
+                    let alpha = style.alpha.unwrap_or(0.5);
+                    let color_style = color.mix(alpha).filled();
+
+                    let series = chart.draw_series(std::iter::once(Polygon::new(
+                        points,
+                        color_style
+                    ))).context("Failed to draw polygon")?;
+
                     if let Some(label) = legend {
                         series.label(label)
                             .legend(move |(x, y)| Rectangle::new([(x, y - 5), (x + 15, y + 5)], color.mix(alpha).filled()));
@@ -188,22 +248,41 @@ impl Canvas {
 }
 
 /// Parse color string to RGBColor
-fn parse_color(color_str: &Option<String>) -> RGBColor {
+
+fn parse_color(color_str: &Option<String>, default_color: RGBColor) -> RGBColor {
+
     match color_str.as_deref() {
+
         Some("red") => RED,
+
         Some("green") => GREEN,
+
         Some("blue") => BLUE,
+
         Some("black") => BLACK,
+
         Some("yellow") => YELLOW,
+
         Some("cyan") => CYAN,
+
         Some("magenta") => MAGENTA,
+
         Some("white") => WHITE,
+
         Some("orange") => RGBColor(255, 165, 0),
+
         Some("purple") => RGBColor(128, 0, 128),
+
         Some("brown") => RGBColor(165, 42, 42),
+
         Some("pink") => RGBColor(255, 192, 203),
+
         Some("gray") => RGBColor(128, 128, 128),
+
         Some("olive") => RGBColor(128, 128, 0),
-        _ => BLUE, // default
+
+        _ => default_color,
+
     }
+
 }

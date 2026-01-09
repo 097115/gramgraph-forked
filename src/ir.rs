@@ -1,5 +1,5 @@
 use crate::parser::ast::Layer;
-use crate::graph::{LineStyle, PointStyle, BarStyle};
+use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle};
 
 // =============================================================================
 // Phase 1: Resolution
@@ -10,6 +10,11 @@ use crate::graph::{LineStyle, PointStyle, BarStyle};
 pub struct ResolvedSpec {
     pub layers: Vec<ResolvedLayer>,
     pub facet: Option<ResolvedFacet>,
+    pub coord: Option<crate::parser::ast::CoordSystem>,
+    pub labels: crate::parser::ast::Labels,
+    pub theme: crate::parser::ast::Theme,
+    pub x_scale_spec: Option<crate::parser::ast::AxisScale>,
+    pub y_scale_spec: Option<crate::parser::ast::AxisScale>,
 }
 
 #[derive(Debug, Clone)]
@@ -21,7 +26,9 @@ pub struct ResolvedLayer {
 #[derive(Debug, Clone)]
 pub struct ResolvedAesthetics {
     pub x_col: String,
-    pub y_col: String,
+    pub y_col: Option<String>,
+    pub ymin_col: Option<String>,
+    pub ymax_col: Option<String>,
     // Optional grouping columns
     pub color: Option<String>,
     pub size: Option<String>,
@@ -82,6 +89,10 @@ pub struct GroupData {
     pub x: Vec<f64>,
     pub y: Vec<f64>,      // Main value (or y_end)
     pub y_start: Vec<f64>, // For stacked bars (0.0 if not stacked)
+
+    // New fields for ribbons/error bars calculated by stats
+    pub y_min: Vec<f64>,
+    pub y_max: Vec<f64>,
     
     // Original category names for x-axis (if categorical)
     pub x_categories: Option<Vec<String>>, 
@@ -95,6 +106,7 @@ pub enum RenderStyle {
     Line(LineStyle),
     Point(PointStyle),
     Bar(BarStyle),
+    Ribbon(RibbonStyle),
 }
 
 // =============================================================================
@@ -133,7 +145,8 @@ pub struct SceneGraph {
     pub width: u32,
     pub height: u32,
     pub panels: Vec<PanelScene>,
-    pub title: Option<String>,
+    pub labels: crate::parser::ast::Labels,
+    pub theme: crate::parser::ast::Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +154,8 @@ pub struct PanelScene {
     pub row: usize,
     pub col: usize,
     pub title: Option<String>,
+    pub x_label: Option<String>,
+    pub y_label: Option<String>,
     pub x_scale: Scale, // For drawing axes
     pub y_scale: Scale,
     pub commands: Vec<DrawCommand>,
@@ -163,6 +178,11 @@ pub enum DrawCommand {
         tl: (f64, f64),
         br: (f64, f64),
         style: BarStyle,
+        legend: Option<String>,
+    },
+    DrawPolygon {
+        points: Vec<(f64, f64)>,
+        style: RibbonStyle,
         legend: Option<String>,
     },
 }

@@ -19,9 +19,8 @@ pub fn render_plot(spec: PlotSpec, csv_data: CsvData) -> Result<Vec<u8>> {
     // Returns RenderData with normalized geometry points.
     let render_data = transform::apply_transformations(&resolved_spec, &csv_data)?;
 
-    // PHASE 3: SCALING
-    // Measure the RenderData to determine coordinate ranges.
-    let scales = scale::build_scales(&render_data, resolved_spec.facet.as_ref())?;
+    // 3. Scaling
+    let scales = scale::build_scales(&render_data, &resolved_spec)?;
 
     // PHASE 4: COMPILATION (MAPPING)
     // Convert data units to drawing commands.

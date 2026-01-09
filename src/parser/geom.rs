@@ -1,12 +1,12 @@
 // Geometry (geom) parser for Grammar of Graphics DSL
 
-use super::ast::{AestheticValue, BarLayer, BarPosition, Layer, LineLayer, PointLayer};
+use super::ast::{AestheticValue, BarLayer, BarPosition, Layer, LineLayer, PointLayer, RibbonLayer};
 use super::lexer::{identifier, number_literal, string_literal, ws};
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::char,
-    combinator::map,
+    combinator::{map, opt},
     multi::separated_list0,
     sequence::preceded,
     IResult,
@@ -170,11 +170,6 @@ pub fn parse_point(input: &str) -> IResult<&str, Layer> {
     Ok((input, Layer::Point(layer)))
 }
 
-/// Argument value for position (special handling)
-enum PositionArg {
-    Position(String),  // position: "dodge"/"stack"/"identity"
-}
-
 /// Parse a bar geometry
 /// Format: bar() or bar(color: "red", position: "dodge", ...) or bar(color: region)
 pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
@@ -257,9 +252,73 @@ pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
     Ok((input, Layer::Bar(layer)))
 }
 
+/// Parse a ribbon geometry
+pub fn parse_ribbon(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("ribbon"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+
+    let (input, args) = separated_list0(
+        ws(char(',')),
+        alt((
+            map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
+            map(preceded(ws(tag("ymin:")), ws(identifier)), |y| ("ymin", ArgValue::ColumnName(y))),
+            map(preceded(ws(tag("ymax:")), ws(identifier)), |y| ("ymax", ArgValue::ColumnName(y))),
+            
+            map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
+            map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
+            
+            map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
+            map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
+        ))
+    )(input)?;
+
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = RibbonLayer::default();
+
+    for (key, val) in args {
+        match (key, val) {
+            ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
+            ("ymin", ArgValue::ColumnName(y)) => layer.ymin = Some(y),
+            ("ymax", ArgValue::ColumnName(y)) => layer.ymax = Some(y),
+            ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
+            ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
+            ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
+            ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
+            _ => {}
+        }
+    }
+
+    Ok((input, Layer::Ribbon(layer)))
+}
+
+/// Parse a histogram geometry (sugar for bar(stat: "bin"))
+pub fn parse_histogram(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("histogram"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+    // Optional bins argument
+    let (input, bins) = opt(preceded(ws(tag("bins:")), ws(number_literal)))(input)?;
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = BarLayer::default();
+    layer.stat = crate::parser::ast::Stat::Bin { bins: bins.unwrap_or(30.0) as usize };
+    Ok((input, Layer::Bar(layer)))
+}
+
+/// Parse a smooth geometry (sugar for line(stat: "smooth"))
+pub fn parse_smooth(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("smooth"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = LineLayer::default();
+    layer.stat = crate::parser::ast::Stat::Smooth { method: "lm".to_string() };
+    Ok((input, Layer::Line(layer)))
+}
+
 /// Parse any geometry layer
 pub fn parse_geom(input: &str) -> IResult<&str, Layer> {
-    alt((parse_line, parse_point, parse_bar))(input)
+    alt((parse_line, parse_point, parse_bar, parse_ribbon, parse_histogram, parse_smooth))(input)
 }
 
 #[cfg(test)]

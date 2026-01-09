@@ -14,6 +14,7 @@ use nom::{
     bytes::complete::tag,
     combinator::{eof, map, opt},
     multi::separated_list0,
+    error::{Error, ErrorKind},
     IResult,
 };
 
@@ -89,9 +90,10 @@ pub fn parse_plot_spec(input: &str) -> IResult<&str, PlotSpec> {
         }
     }
 
-    // Validation: Check for at least one layer? 
-    // ggplot2 allows plot without layers (just axes), but for now let's keep it flexible.
-    // If no layers, `compile` might produce empty plot.
+    // Validation: Must have at least one layer
+    if layers.is_empty() {
+        return Err(nom::Err::Error(Error::new(input, ErrorKind::Verify)));
+    }
 
     Ok((
         input,

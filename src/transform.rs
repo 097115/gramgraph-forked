@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use std::collections::{HashMap, HashSet};
-use crate::csv_reader::CsvData;
+use crate::data::PlotData;
 use crate::ir::{RenderData, PanelData, LayerData, GroupData, FacetLayout, RenderStyle};
 use crate::ir::{ResolvedSpec, ResolvedLayer, ResolvedAesthetics, ResolvedFacet};
 use crate::parser::ast::{Layer, BarPosition, Stat};
@@ -8,9 +8,9 @@ use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle};
 use crate::palette::{ColorPalette, SizePalette, ShapePalette};
 
 /// Main entry point: Transform resolved spec and CSV data into renderable data
-pub fn apply_transformations(spec: &ResolvedSpec, csv_data: &CsvData) -> Result<RenderData> {
+pub fn apply_transformations(spec: &ResolvedSpec, data: &PlotData) -> Result<RenderData> {
     // 1. Partition Data (Faceting)
-    let partitions = partition_data(spec, csv_data)?;
+    let partitions = partition_data(spec, data)?;
     
     // 2. Calculate Layout info
     let (nrow, ncol) = calculate_grid_dimensions(partitions.len(), spec.facet.as_ref());
@@ -35,20 +35,20 @@ pub fn apply_transformations(spec: &ResolvedSpec, csv_data: &CsvData) -> Result<
 
 struct DataPartition {
     title: String,
-    data: CsvData,
+    data: PlotData,
 }
 
 /// Split CSV data based on facet configuration
-fn partition_data(spec: &ResolvedSpec, csv_data: &CsvData) -> Result<Vec<DataPartition>> {
+fn partition_data(spec: &ResolvedSpec, data: &PlotData) -> Result<Vec<DataPartition>> {
     if let Some(facet) = &spec.facet {
         // Find facet column index
-        let col_idx = csv_data.headers.iter()
+        let col_idx = data.headers.iter()
             .position(|h| h.eq_ignore_ascii_case(&facet.col))
             .ok_or_else(|| anyhow!("Facet column '{}' not found", facet.col))?;
 
         // Group rows
         let mut groups: HashMap<String, Vec<Vec<String>>> = HashMap::new();
-        for row in &csv_data.rows {
+        for row in &data.rows {
             if let Some(val) = row.get(col_idx) {
                 groups.entry(val.clone()).or_default().push(row.clone());
             }
@@ -63,8 +63,8 @@ fn partition_data(spec: &ResolvedSpec, csv_data: &CsvData) -> Result<Vec<DataPar
             let rows = groups.remove(&key).unwrap();
             partitions.push(DataPartition {
                 title: key,
-                data: CsvData {
-                    headers: csv_data.headers.clone(),
+                data: PlotData {
+                    headers: data.headers.clone(),
                     rows,
                 },
             });
@@ -74,7 +74,7 @@ fn partition_data(spec: &ResolvedSpec, csv_data: &CsvData) -> Result<Vec<DataPar
         // No facet, single partition
         Ok(vec![DataPartition {
             title: "".to_string(),
-            data: csv_data.clone(), // Clone is expensive but safe for now
+            data: data.clone(), // Clone is expensive but safe for now
         }])
     }
 }
@@ -108,7 +108,7 @@ fn process_partition(index: usize, partition: DataPartition, spec: &ResolvedSpec
 }
 
 /// Process a single layer: Extract, Group, Stack
-fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<LayerData> {
+fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerData> {
     let aes = &layer_spec.aesthetics;
     
     // 1. Identify Grouping Column
@@ -123,18 +123,18 @@ fn process_layer(layer_spec: &ResolvedLayer, csv_data: &CsvData) -> Result<Layer
     let mut raw_groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)> = HashMap::new();
     
     // Column Indices
-    let x_idx = find_col_index(&csv_data.headers, &aes.x_col)?;
-    let y_idx = if let Some(y) = &aes.y_col { Some(find_col_index(&csv_data.headers, y)?) } else { None };
-    let ymin_idx = if let Some(col) = &aes.ymin_col { Some(find_col_index(&csv_data.headers, col)?) } else { None };
-    let ymax_idx = if let Some(col) = &aes.ymax_col { Some(find_col_index(&csv_data.headers, col)?) } else { None };
+    let x_idx = find_col_index(&data.headers, &aes.x_col)?;
+    let y_idx = if let Some(y) = &aes.y_col { Some(find_col_index(&data.headers, y)?) } else { None };
+    let ymin_idx = if let Some(col) = &aes.ymin_col { Some(find_col_index(&data.headers, col)?) } else { None };
+    let ymax_idx = if let Some(col) = &aes.ymax_col { Some(find_col_index(&data.headers, col)?) } else { None };
 
     let group_idx = if let Some(g) = group_col {
-        Some(find_col_index(&csv_data.headers, g)?)
+        Some(find_col_index(&data.headers, g)?)
     } else {
         None
     };
 
-    for row in &csv_data.rows {
+    for row in &data.rows {
         let x_str = row[x_idx].clone();
         let y_val = if let Some(idx) = y_idx { 
             row[idx].parse::<f64>().context(format!("Failed to parse Y value '{}'", row[idx]))?
@@ -510,8 +510,8 @@ mod tests {
     use super::*;
     use crate::parser::ast::{Layer, LineLayer};
 
-    fn make_data() -> CsvData {
-        CsvData {
+    fn make_data() -> PlotData {
+        PlotData {
             headers: vec!["x".to_string(), "y".to_string(), "cat".to_string()],
             rows: vec![
                 vec!["1.0".to_string(), "10.0".to_string(), "A".to_string()],

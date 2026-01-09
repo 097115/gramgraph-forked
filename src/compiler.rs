@@ -1,12 +1,14 @@
 use anyhow::Result;
 use crate::ir::{RenderData, ScaleSystem, ResolvedSpec, SceneGraph, PanelScene, DrawCommand, RenderStyle};
 use crate::parser::ast::{Layer, BarPosition};
+use crate::RenderOptions;
 
 /// Compile data and scales into a SceneGraph of drawing commands
 pub fn compile_geometry(
     data: RenderData, 
     scales: ScaleSystem, 
-    spec: &ResolvedSpec
+    spec: &ResolvedSpec,
+    options: &RenderOptions,
 ) -> Result<SceneGraph> {
     let mut panels = Vec::new();
     let is_flipped = matches!(spec.coord, Some(crate::parser::ast::CoordSystem::Flip));
@@ -151,8 +153,8 @@ pub fn compile_geometry(
     }
 
     Ok(SceneGraph {
-        width: 800, // Default, can be overridden or passed in
-        height: 600,
+        width: options.width,
+        height: options.height,
         panels,
         labels: spec.labels.clone(),
         theme: spec.theme.clone(),
@@ -217,7 +219,8 @@ mod tests {
     #[test]
     fn test_compile_line() {
         let (data, scales, spec) = make_test_data();
-        let scene = compile_geometry(data, scales, &spec).unwrap();
+        let options = RenderOptions::default();
+        let scene = compile_geometry(data, scales, &spec, &options).unwrap();
         
         assert_eq!(scene.panels.len(), 1);
         let panel = &scene.panels[0];

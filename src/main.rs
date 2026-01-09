@@ -1,7 +1,7 @@
-use gramgraph::{csv_reader, parser, runtime};
+use gramgraph::{csv_reader, parser, runtime, RenderOptions, OutputFormat, data::PlotData};
 
 use anyhow::{anyhow, Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use csv::ReaderBuilder;
 use std::io::{self, Read, Write};
 
@@ -11,11 +11,38 @@ use std::io::{self, Read, Write};
 struct Args {
     /// GramGraph DSL string (e.g., 'chart(x: time, y: temp) | layer_line(color: "red")')
     dsl: String,
+
+    /// Output width in pixels
+    #[arg(long, default_value_t = 800)]
+    width: u32,
+
+    /// Output height in pixels
+    #[arg(long, default_value_t = 600)]
+    height: u32,
+
+    /// Output format (png, svg)
+    #[arg(long, value_enum, default_value_t = FormatArg::Png)]
+    format: FormatArg,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum FormatArg {
+    Png,
+    Svg,
+}
+
+impl From<FormatArg> for OutputFormat {
+    fn from(arg: FormatArg) -> Self {
+        match arg {
+            FormatArg::Png => OutputFormat::Png,
+            FormatArg::Svg => OutputFormat::Svg,
+        }
+    }
 }
 
 /// Process DSL and CSV data to generate PNG bytes
 /// This function is extracted for testability
-pub fn process_dsl(dsl: &str, csv_content: impl Read) -> Result<Vec<u8>> {
+pub fn process_dsl(dsl: &str, csv_content: impl Read, options: RenderOptions) -> Result<Vec<u8>> {
     // Read CSV
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(csv_content);
 
@@ -38,6 +65,7 @@ pub fn process_dsl(dsl: &str, csv_content: impl Read) -> Result<Vec<u8>> {
     }
 
     let csv_data = csv_reader::CsvData { headers, rows };
+    let plot_data = PlotData::from_csv(csv_data);
 
     // Parse the DSL string
     let plot_spec = match parser::parse_plot_spec(dsl) {
@@ -53,19 +81,26 @@ pub fn process_dsl(dsl: &str, csv_content: impl Read) -> Result<Vec<u8>> {
     };
 
     // Render the plot
-    runtime::render_plot(plot_spec, csv_data).context("Failed to render plot")
+    runtime::render_plot(plot_spec, plot_data, options).context("Failed to render plot")
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let png_bytes = process_dsl(&args.dsl, io::stdin())?;
 
-    // Write PNG to stdout
+    let options = RenderOptions {
+        width: args.width,
+        height: args.height,
+        format: args.format.into(),
+    };
+
+    let bytes = process_dsl(&args.dsl, io::stdin(), options)?;
+
+    // Write output to stdout
     let stdout = io::stdout();
     let mut handle = stdout.lock();
     handle
-        .write_all(&png_bytes)
-        .context("Failed to write PNG to stdout")?;
+        .write_all(&bytes)
+        .context("Failed to write output to stdout")?;
     handle.flush().context("Failed to flush stdout")?;
 
     Ok(())
@@ -80,7 +115,7 @@ mod tests {
     fn test_process_dsl_line_chart() {
         let csv = "x,y\n1,10\n2,20\n3,30\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: x, y: y) | line()", cursor);
+        let result = process_dsl("aes(x: x, y: y) | line()", cursor, RenderOptions::default());
         assert!(result.is_ok());
         let png_bytes = result.unwrap();
         assert!(png_bytes.len() > 8);
@@ -91,7 +126,7 @@ mod tests {
     fn test_process_dsl_parse_error() {
         let csv = "x,y\n1,10\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("invalid syntax here", cursor);
+        let result = process_dsl("invalid syntax here", cursor, RenderOptions::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Parse error"));
     }
@@ -100,7 +135,7 @@ mod tests {
     fn test_process_dsl_csv_error() {
         let csv = "x,y\n"; // No data rows
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: x, y: y) | line()", cursor);
+        let result = process_dsl("aes(x: x, y: y) | line()", cursor, RenderOptions::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("at least one data row"));
     }
@@ -109,7 +144,7 @@ mod tests {
     fn test_process_dsl_column_not_found() {
         let csv = "a,b\n1,10\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: x, y: y) | line()", cursor);
+        let result = process_dsl("aes(x: x, y: y) | line()", cursor, RenderOptions::default());
         assert!(result.is_err());
         // Error is wrapped with context, so check for the context message
         assert!(result.unwrap_err().to_string().contains("Failed to render plot"));
@@ -119,7 +154,7 @@ mod tests {
     fn test_process_dsl_bar_chart() {
         let csv = "cat,val\nA,10\nB,20\nC,30\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: cat, y: val) | bar()", cursor);
+        let result = process_dsl("aes(x: cat, y: val) | bar()", cursor, RenderOptions::default());
         assert!(result.is_ok());
     }
 
@@ -127,7 +162,7 @@ mod tests {
     fn test_process_dsl_multiple_layers() {
         let csv = "x,y\n1,10\n2,20\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: x, y: y) | line() | point()", cursor);
+        let result = process_dsl("aes(x: x, y: y) | line() | point()", cursor, RenderOptions::default());
         assert!(result.is_ok());
     }
 
@@ -136,7 +171,7 @@ mod tests {
         // Trailing unparsed input causes parse error
         let csv = "x,y\n1,10\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("line() extra_stuff", cursor);
+        let result = process_dsl("line() extra_stuff", cursor, RenderOptions::default());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Parse error"));
     }
@@ -145,7 +180,7 @@ mod tests {
     fn test_process_dsl_empty_input() {
         let csv = "x,y\n1,10\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("", cursor);
+        let result = process_dsl("", cursor, RenderOptions::default());
         assert!(result.is_err());
     }
 
@@ -153,7 +188,7 @@ mod tests {
     fn test_process_dsl_unicode_data() {
         let csv = "x,température\n1,20.5\n2,22.0\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: x, y: température) | line()", cursor);
+        let result = process_dsl("aes(x: x, y: température) | line()", cursor, RenderOptions::default());
         assert!(result.is_ok());
     }
 
@@ -161,7 +196,7 @@ mod tests {
     fn test_process_dsl_point_chart() {
         let csv = "height,weight\n170,70\n180,85\n160,60\n";
         let cursor = Cursor::new(csv);
-        let result = process_dsl("aes(x: height, y: weight) | point(size: 5)", cursor);
+        let result = process_dsl("aes(x: height, y: weight) | point(size: 5)", cursor, RenderOptions::default());
         assert!(result.is_ok());
     }
 }

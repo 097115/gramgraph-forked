@@ -1,10 +1,10 @@
 use anyhow::Result;
 use crate::parser::ast::{PlotSpec, Layer, Aesthetics, AestheticValue};
-use crate::csv_reader::CsvData;
+use crate::data::PlotData;
 use crate::ir::{ResolvedSpec, ResolvedLayer, ResolvedAesthetics, ResolvedFacet};
 
 /// Resolve all aesthetic mappings for the entire plot
-pub fn resolve_plot_aesthetics(spec: &PlotSpec, _csv_data: &CsvData) -> Result<ResolvedSpec> {
+pub fn resolve_plot_aesthetics(spec: &PlotSpec, _data: &PlotData) -> Result<ResolvedSpec> {
     // 1. Resolve Facet (if any)
     let facet = if let Some(f) = &spec.facet {
         Some(ResolvedFacet {
@@ -170,10 +170,10 @@ fn extract_mapped_string_from_f64(value: &Option<AestheticValue<f64>>) -> Option
 mod tests {
     use super::*;
     use crate::parser::ast::{Aesthetics, Layer, LineLayer, PointLayer};
-    use crate::csv_reader::CsvData;
+    use crate::data::PlotData;
 
-    fn make_csv() -> CsvData {
-        CsvData {
+    fn make_data() -> PlotData {
+        PlotData {
             headers: vec!["x".to_string(), "y".to_string(), "g".to_string()],
             rows: vec![],
         }
@@ -200,8 +200,8 @@ mod tests {
             x_scale: None,
             y_scale: None,
         };
-        let csv = make_csv();
-        let resolved = resolve_plot_aesthetics(&spec, &csv).unwrap();
+        let data = make_data();
+        let resolved = resolve_plot_aesthetics(&spec, &data).unwrap();
         assert_eq!(resolved.layers.len(), 1);
         assert_eq!(resolved.layers[0].aesthetics.x_col, "x");
         assert_eq!(resolved.layers[0].aesthetics.y_col, Some("y".to_string()));
@@ -232,8 +232,8 @@ mod tests {
             x_scale: None,
             y_scale: None,
         };
-        let csv = make_csv();
-        let resolved = resolve_plot_aesthetics(&spec, &csv).unwrap();
+        let data = make_data();
+        let resolved = resolve_plot_aesthetics(&spec, &data).unwrap();
         assert_eq!(resolved.layers[0].aesthetics.y_col, Some("g".to_string()));
     }
 
@@ -249,8 +249,8 @@ mod tests {
             x_scale: None,
             y_scale: None,
         };
-        let csv = make_csv();
-        let res = resolve_plot_aesthetics(&spec, &csv);
+        let data = make_data();
+        let res = resolve_plot_aesthetics(&spec, &data);
         assert!(res.is_err());
     }
 
@@ -279,8 +279,8 @@ mod tests {
             x_scale: None,
             y_scale: None,
         };
-        let csv = make_csv();
-        let resolved = resolve_plot_aesthetics(&spec, &csv).unwrap();
+        let data = make_data();
+        let resolved = resolve_plot_aesthetics(&spec, &data).unwrap();
         assert!(resolved.facet.is_some());
         assert_eq!(resolved.facet.unwrap().col, "g");
     }

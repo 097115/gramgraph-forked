@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use image::ImageEncoder;
 use plotters::prelude::*;
 use crate::ir::{SceneGraph, PanelScene, DrawCommand};
+use crate::{OutputFormat, RenderOptions};
 
 /// Style configuration for line layers
 #[derive(Debug, Clone, Default)]
@@ -39,8 +40,15 @@ pub struct RibbonStyle {
 pub struct Canvas;
 
 impl Canvas {
-    /// Execute the SceneGraph and produce a PNG
-    pub fn execute(scene: SceneGraph) -> Result<Vec<u8>> {
+    /// Execute the SceneGraph and produce a byte vector (PNG or SVG)
+    pub fn execute(scene: SceneGraph, options: &RenderOptions) -> Result<Vec<u8>> {
+        match options.format {
+            OutputFormat::Png => Self::render_png(scene, options),
+            OutputFormat::Svg => Self::render_svg(scene, options),
+        }
+    }
+
+    fn render_png(scene: SceneGraph, _options: &RenderOptions) -> Result<Vec<u8>> {
         let width = scene.width;
         let height = scene.height;
         let mut buffer = vec![0u8; (width * height * 3) as usize];
@@ -48,33 +56,7 @@ impl Canvas {
         {
             let root = BitMapBackend::with_buffer(&mut buffer, (width, height))
                 .into_drawing_area();
-
-            let bg_color = parse_color(&scene.theme.background_color, WHITE);
-            root.fill(&bg_color).context("Failed to fill background")?;
-
-            // Determine Grid Layout
-            let max_row = scene.panels.iter().map(|p| p.row).max().unwrap_or(0);
-            let max_col = scene.panels.iter().map(|p| p.col).max().unwrap_or(0);
-            
-            let rows = max_row + 1;
-            let cols = max_col + 1;
-
-            let areas = root.split_evenly((rows, cols));
-
-            // Draw Global Labels (Very basic implementation)
-            if let Some(title) = &scene.labels.title {
-                 root.draw_text(title, &TextStyle::from(("sans-serif", 30).into_font()).color(&BLACK), (10, 10))?;
-            }
-
-            for panel in scene.panels {
-                let area_idx = panel.row * cols + panel.col;
-                if area_idx >= areas.len() { continue; }
-                
-                let area = &areas[area_idx];
-                Canvas::draw_panel(area, panel, &scene.theme)?;
-            }
-            
-            root.present().context("Failed to present drawing")?;
+            Self::draw_scene(&root, &scene)?;
         }
 
         // Encode as PNG
@@ -94,9 +76,50 @@ impl Canvas {
         Ok(png_bytes)
     }
 
+    fn render_svg(scene: SceneGraph, _options: &RenderOptions) -> Result<Vec<u8>> {
+        let mut buffer = String::new();
+        {
+            let root = SVGBackend::with_string(&mut buffer, (scene.width, scene.height))
+                .into_drawing_area();
+            Self::draw_scene(&root, &scene)?;
+        }
+        Ok(buffer.into_bytes())
+    }
+
+    fn draw_scene<DB: DrawingBackend>(root: &DrawingArea<DB, plotters::coord::Shift>, scene: &SceneGraph) -> Result<()> 
+    where DB::ErrorType: 'static {
+        let bg_color = parse_color(&scene.theme.background_color, WHITE);
+        root.fill(&bg_color).context("Failed to fill background")?;
+
+        // Determine Grid Layout
+        let max_row = scene.panels.iter().map(|p| p.row).max().unwrap_or(0);
+        let max_col = scene.panels.iter().map(|p| p.col).max().unwrap_or(0);
+        
+        let rows = max_row + 1;
+        let cols = max_col + 1;
+
+        let areas = root.split_evenly((rows, cols));
+
+        // Draw Global Labels (Very basic implementation)
+        if let Some(title) = &scene.labels.title {
+                root.draw_text(title, &TextStyle::from(("sans-serif", 30).into_font()).color(&BLACK), (10, 10))?;
+        }
+
+        for panel in &scene.panels {
+            let area_idx = panel.row * cols + panel.col;
+            if area_idx >= areas.len() { continue; }
+            
+            let area = &areas[area_idx];
+            Canvas::draw_panel(area, panel, &scene.theme)?;
+        }
+        
+        root.present().context("Failed to present drawing")?;
+        Ok(())
+    }
+
     fn draw_panel<DB: DrawingBackend>(
         area: &DrawingArea<DB, plotters::coord::Shift>, 
-        panel: PanelScene,
+        panel: &PanelScene,
         theme: &crate::parser::ast::Theme,
     ) -> Result<()> 
     where <DB as plotters::prelude::DrawingBackend>::ErrorType: 'static
@@ -108,7 +131,7 @@ impl Canvas {
             
         chart_builder
             .margin(10)
-            .caption(panel.title.unwrap_or_default(), ("sans-serif", 15))
+            .caption(panel.title.clone().unwrap_or_default(), ("sans-serif", 15))
             .x_label_area_size(30)
             .y_label_area_size(40);
 
@@ -171,7 +194,7 @@ impl Canvas {
         mesh.draw().context("Failed to draw mesh")?;
 
         // Draw Commands
-        for cmd in panel.commands {
+        for cmd in &panel.commands {
             match cmd {
                 DrawCommand::DrawLine { points, style, legend } => {
                     let color = parse_color(&style.color, BLUE);
@@ -179,7 +202,7 @@ impl Canvas {
                     let alpha = style.alpha.unwrap_or(1.0);
                     let color_style = color.mix(alpha).stroke_width(stroke_width);
 
-                    let series = chart.draw_series(LineSeries::new(points, color_style))
+                    let series = chart.draw_series(LineSeries::new(points.iter().cloned(), color_style))
                         .context("Failed to draw line")?;
 
                     if let Some(label) = legend {
@@ -208,7 +231,7 @@ impl Canvas {
                     let color_style = color.mix(alpha).filled();
 
                     let series = chart.draw_series(std::iter::once(Rectangle::new(
-                        [tl, br],
+                        [*tl, *br],
                         color_style
                     ))).context("Failed to draw rect")?;
                     
@@ -223,7 +246,7 @@ impl Canvas {
                     let color_style = color.mix(alpha).filled();
 
                     let series = chart.draw_series(std::iter::once(Polygon::new(
-                        points,
+                        points.clone(),
                         color_style
                     ))).context("Failed to draw polygon")?;
 

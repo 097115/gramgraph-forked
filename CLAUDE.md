@@ -68,9 +68,6 @@ CSV Data → Resolution → Transformation → Scaling → Compilation → Rende
 aes(x: column, y: column) | geom() | labs() | theme() | scales()
 ```
 
-**Note on Order**: The pipeline generally expects:
-`Geometries` -> `Coordinates` -> `Labels` -> `Theme` -> `Scales`
-
 ### Examples
 
 **Simple line chart:**

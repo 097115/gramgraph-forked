@@ -1,7 +1,7 @@
 // Pipeline parser for Grammar of Graphics DSL
 
 use super::aesthetics::parse_aesthetics;
-use super::ast::PlotSpec;
+use super::ast::{Aesthetics, AxisScale, CoordSystem, Facet, Labels, Layer, PlotSpec, Theme};
 use super::coord::parse_coord_flip;
 use super::facet::parse_facet_wrap;
 use super::geom::parse_geom;
@@ -10,14 +10,38 @@ use super::scale::parse_scale_command;
 use super::theme::parse_theme_command;
 use super::lexer::ws;
 use nom::{
+    branch::alt,
     bytes::complete::tag,
-    combinator::{eof, opt},
-    multi::many0,
+    combinator::{eof, map, opt},
+    multi::separated_list0,
     IResult,
 };
 
+#[derive(Debug)]
+enum PipelineComponent {
+    Aes(Aesthetics),
+    Layer(Layer),
+    Facet(Facet),
+    Coord(CoordSystem),
+    Labels(Labels),
+    Theme(Theme),
+    Scale(bool, AxisScale), // is_x, scale
+}
+
+fn parse_pipeline_component(input: &str) -> IResult<&str, PipelineComponent> {
+    alt((
+        map(parse_aesthetics, PipelineComponent::Aes),
+        map(parse_geom, PipelineComponent::Layer),
+        map(parse_facet_wrap, PipelineComponent::Facet),
+        map(parse_coord_flip, PipelineComponent::Coord),
+        map(parse_labs, PipelineComponent::Labels),
+        map(parse_theme_command, PipelineComponent::Theme),
+        map(parse_scale_command, |(is_x, s)| PipelineComponent::Scale(is_x, s)),
+    ))(input)
+}
+
 /// Parse a complete plot specification
-/// Format: [aes(...) |] geom() | geom() | ...
+/// Format: component | component | ...
 pub fn parse_plot_spec(input: &str) -> IResult<&str, PlotSpec> {
     // Optional: consume leading "df"
     let (input, _) = opt(ws(tag("df")))(input)?;
@@ -25,69 +49,49 @@ pub fn parse_plot_spec(input: &str) -> IResult<&str, PlotSpec> {
     // If input starts with "|", consume it
     let (input, _) = opt(ws(tag("|")))(input)?;
 
-    // Try to parse aesthetics (optional but recommended)
-    let (input, aesthetics) = opt(parse_aesthetics)(input)?;
-
-    // If we parsed aesthetics, consume the pipe separator
-    let (input, _) = if aesthetics.is_some() {
-        let (input, _) = ws(tag("|"))(input)?;
-        (input, ())
-    } else {
-        (input, ())
-    };
-
-    // Parse first geometry (required)
-    let (input, first_geom) = parse_geom(input)?;
-
-    // Parse additional geometries
-    let (input, mut remaining_geoms) = many0(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_geom(input)
-    })(input)?;
-
-    // Parse optional facet_wrap at the end
-    let (input, facet) = opt(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_facet_wrap(input)
-    })(input)?;
-
-    // Parse optional coord_flip at the end
-    let (input, coord) = opt(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_coord_flip(input)
-    })(input)?;
-
-    // Parse optional labs
-    let (input, labels) = opt(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_labs(input)
-    })(input)?;
-
-    // Parse optional theme
-    let (input, theme) = opt(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_theme_command(input)
-    })(input)?;
-
-    // Parse optional scales
-    let (input, scales) = many0(|input| {
-        let (input, _) = ws(tag("|"))(input)?;
-        parse_scale_command(input)
-    })(input)?;
+    // Parse list of components separated by "|"
+    let (input, components) = separated_list0(
+        ws(tag("|")),
+        parse_pipeline_component
+    )(input)?;
 
     // Consume trailing whitespace and ensure end of input
     let (input, _) = ws(eof)(input)?;
 
-    // Build layers vec
-    let mut layers = vec![first_geom];
-    layers.append(&mut remaining_geoms);
-
+    // Aggregate components into PlotSpec
+    let mut aesthetics = None;
+    let mut layers = Vec::new();
+    let mut facet = None;
+    let mut coord = None;
+    let mut labels = None;
+    let mut theme = None;
     let mut x_scale = None;
     let mut y_scale = None;
-    for (is_x, s) in scales {
-        if is_x { x_scale = Some(s); }
-        else { y_scale = Some(s); }
+
+    for comp in components {
+        match comp {
+            PipelineComponent::Aes(a) => aesthetics = Some(a),
+            PipelineComponent::Layer(l) => layers.push(l),
+            PipelineComponent::Facet(f) => facet = Some(f),
+            PipelineComponent::Coord(c) => coord = Some(c),
+            PipelineComponent::Labels(l) => {
+                // Merge or override? Let's override for simplicity, or merge fields if needed.
+                // For now, simple override.
+                labels = Some(l);
+            }
+            PipelineComponent::Theme(t) => {
+                // Simple override for theme too
+                theme = Some(t);
+            }
+            PipelineComponent::Scale(is_x, s) => {
+                if is_x { x_scale = Some(s); } else { y_scale = Some(s); }
+            }
+        }
     }
+
+    // Validation: Check for at least one layer? 
+    // ggplot2 allows plot without layers (just axes), but for now let's keep it flexible.
+    // If no layers, `compile` might produce empty plot.
 
     Ok((
         input,

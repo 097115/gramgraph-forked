@@ -192,17 +192,4 @@ pub enum DrawCommand {
         style: RibbonStyle,
         legend: Option<String>,
     },
-    DrawBoxplot {
-        x: f64,
-        width: f64,
-        min: f64,
-        q1: f64,
-        median: f64,
-        q3: f64,
-        max: f64,
-        outliers: Vec<f64>,
-        style: BoxplotStyle,
-        legend: Option<String>,
-        is_vertical: bool,
-    },
 }

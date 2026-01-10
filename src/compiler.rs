@@ -1,9 +1,102 @@
 use anyhow::Result;
 use crate::ir::{RenderData, ScaleSystem, ResolvedSpec, SceneGraph, PanelScene, DrawCommand, RenderStyle};
 use crate::parser::ast::{Layer, BarPosition};
+use crate::graph::{LineStyle, PointStyle, BarStyle, BoxplotStyle};
 use crate::RenderOptions;
 
 use std::collections::HashMap;
+
+// =============================================================================
+// Boxplot Geometry Helpers
+// =============================================================================
+
+/// Computed geometry for a single boxplot, expressed as primitive shapes
+struct BoxplotGeometry {
+    lower_whisker: Vec<(f64, f64)>,
+    upper_whisker: Vec<(f64, f64)>,
+    min_cap: Vec<(f64, f64)>,
+    max_cap: Vec<(f64, f64)>,
+    box_tl: (f64, f64),
+    box_br: (f64, f64),
+    median_line: Vec<(f64, f64)>,
+    outlier_points: Vec<(f64, f64)>,
+}
+
+/// Calculates boxplot primitive geometry for a single boxplot
+fn compute_boxplot_geometry(
+    x: f64,
+    width: f64,
+    min: f64,
+    q1: f64,
+    median: f64,
+    q3: f64,
+    max: f64,
+    outliers: &[f64],
+    is_vertical: bool,
+) -> BoxplotGeometry {
+    let half_width = width / 2.0;
+    let cap_width = width * 0.4;
+    let cap_half = cap_width / 2.0;
+
+    if is_vertical {
+        BoxplotGeometry {
+            lower_whisker: vec![(x, min), (x, q1)],
+            upper_whisker: vec![(x, q3), (x, max)],
+            min_cap: vec![(x - cap_half, min), (x + cap_half, min)],
+            max_cap: vec![(x - cap_half, max), (x + cap_half, max)],
+            box_tl: (x - half_width, q3),
+            box_br: (x + half_width, q1),
+            median_line: vec![(x - half_width, median), (x + half_width, median)],
+            outlier_points: outliers.iter().map(|&v| (x, v)).collect(),
+        }
+    } else {
+        // Horizontal orientation (coord_flip)
+        BoxplotGeometry {
+            lower_whisker: vec![(min, x), (q1, x)],
+            upper_whisker: vec![(q3, x), (max, x)],
+            min_cap: vec![(min, x - cap_half), (min, x + cap_half)],
+            max_cap: vec![(max, x - cap_half), (max, x + cap_half)],
+            box_tl: (q1, x - half_width),
+            box_br: (q3, x + half_width),
+            median_line: vec![(median, x - half_width), (median, x + half_width)],
+            outlier_points: outliers.iter().map(|&v| (v, x)).collect(),
+        }
+    }
+}
+
+/// Converts BoxplotStyle into component styles for boxplot primitives
+fn boxplot_component_styles(style: &BoxplotStyle) -> (LineStyle, BarStyle, LineStyle, PointStyle) {
+    // Whisker lines - use main color
+    let whisker_style = LineStyle {
+        color: style.color.clone(),
+        width: Some(2.0),
+        alpha: style.alpha,
+    };
+
+    // Box fill
+    let box_style = BarStyle {
+        color: style.color.clone(),
+        alpha: style.alpha,
+        width: None,
+    };
+
+    // Median line - white for contrast
+    let median_style = LineStyle {
+        color: Some("white".to_string()),
+        width: Some(2.0),
+        alpha: Some(0.9),
+    };
+
+    // Outliers - use outlier-specific style or fallback to main color
+    let outlier_style = PointStyle {
+        color: style.outlier_color.clone().or_else(|| style.color.clone()),
+        size: style.outlier_size,
+        shape: style.outlier_shape.clone(),
+        alpha: style.alpha,
+    };
+
+    (whisker_style, box_style, median_style, outlier_style)
+}
 
 /// Compile data and scales into a SceneGraph of drawing commands
 pub fn compile_geometry(
@@ -122,44 +215,95 @@ pub fn compile_geometry(
                     }
                     RenderStyle::Boxplot(style) => {
                         let width_ratio = style.width.unwrap_or(0.5);
+                        let (whisker_style, box_style, median_style, outlier_style) =
+                            boxplot_component_styles(style);
 
                         for i in 0..group.x.len() {
-                             let x_center = group.x[i];
-                             
-                             // Calculate Dodge Offset for this specific point
-                             let (slot_width, x_offset) = if matches!(position, BarPosition::Dodge) {
-                                 let key = x_center.round() as i64;
-                                 if let Some(occupants) = x_occupancy.get(&key) {
-                                     let num_at_x = occupants.len();
-                                     if let Some(rank) = occupants.iter().position(|&g| g == group_idx) {
-                                         let slot = width_ratio / num_at_x as f64;
-                                         let offset = (rank as f64 - (num_at_x as f64 - 1.0) / 2.0) * slot;
-                                         (slot, offset)
-                                     } else {
-                                         (width_ratio, 0.0)
-                                     }
-                                 } else {
-                                     (width_ratio, 0.0)
-                                 }
-                             } else {
-                                 (width_ratio, 0.0)
-                             };
+                            let x_center = group.x[i];
 
-                             let x_final = x_center + x_offset;
+                            // Calculate Dodge Offset for this specific point
+                            let (slot_width, x_offset) = if matches!(position, BarPosition::Dodge) {
+                                let key = x_center.round() as i64;
+                                if let Some(occupants) = x_occupancy.get(&key) {
+                                    let num_at_x = occupants.len();
+                                    if let Some(rank) = occupants.iter().position(|&g| g == group_idx) {
+                                        let slot = width_ratio / num_at_x as f64;
+                                        let offset = (rank as f64 - (num_at_x as f64 - 1.0) / 2.0) * slot;
+                                        (slot, offset)
+                                    } else {
+                                        (width_ratio, 0.0)
+                                    }
+                                } else {
+                                    (width_ratio, 0.0)
+                                }
+                            } else {
+                                (width_ratio, 0.0)
+                            };
 
-                             commands.push(DrawCommand::DrawBoxplot {
-                                 x: x_final,
-                                 width: slot_width, 
-                                 min: group.y_min[i],
-                                 q1: group.y_q1[i],
-                                 median: group.y_median[i],
-                                 q3: group.y_q3[i],
-                                 max: group.y_max[i],
-                                 outliers: group.outliers[i].clone(),
-                                 style: style.clone(),
-                                 legend: if i == 0 { Some(group.key.clone()) } else { None },
-                                 is_vertical: !is_flipped,
-                             });
+                            let x_final = x_center + x_offset;
+                            let is_vertical = !is_flipped;
+
+                            let geom = compute_boxplot_geometry(
+                                x_final,
+                                slot_width,
+                                group.y_min[i],
+                                group.y_q1[i],
+                                group.y_median[i],
+                                group.y_q3[i],
+                                group.y_max[i],
+                                &group.outliers[i],
+                                is_vertical,
+                            );
+
+                            // Emit primitive commands in correct z-order
+
+                            // 1. Whiskers (lines from min/max to box edges)
+                            commands.push(DrawCommand::DrawLine {
+                                points: geom.lower_whisker,
+                                style: whisker_style.clone(),
+                                legend: None,
+                            });
+                            commands.push(DrawCommand::DrawLine {
+                                points: geom.upper_whisker,
+                                style: whisker_style.clone(),
+                                legend: None,
+                            });
+
+                            // 2. Whisker caps
+                            commands.push(DrawCommand::DrawLine {
+                                points: geom.min_cap,
+                                style: whisker_style.clone(),
+                                legend: None,
+                            });
+                            commands.push(DrawCommand::DrawLine {
+                                points: geom.max_cap,
+                                style: whisker_style.clone(),
+                                legend: None,
+                            });
+
+                            // 3. Box (rectangle) - legend attached here
+                            commands.push(DrawCommand::DrawRect {
+                                tl: geom.box_tl,
+                                br: geom.box_br,
+                                style: box_style.clone(),
+                                legend: if i == 0 { Some(group.key.clone()) } else { None },
+                            });
+
+                            // 4. Median line (white for contrast)
+                            commands.push(DrawCommand::DrawLine {
+                                points: geom.median_line,
+                                style: median_style.clone(),
+                                legend: None,
+                            });
+
+                            // 5. Outliers (if any)
+                            if !geom.outlier_points.is_empty() {
+                                commands.push(DrawCommand::DrawPoint {
+                                    points: geom.outlier_points,
+                                    style: outlier_style.clone(),
+                                    legend: None,
+                                });
+                            }
                         }
                     }
                     RenderStyle::Ribbon(style) => {

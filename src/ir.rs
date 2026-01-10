@@ -1,5 +1,5 @@
 use crate::parser::ast::Layer;
-use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle};
+use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle, BoxplotStyle};
 
 // =============================================================================
 // Phase 1: Resolution
@@ -94,6 +94,12 @@ pub struct GroupData {
     pub y_min: Vec<f64>,
     pub y_max: Vec<f64>,
     
+    // Boxplot statistics
+    pub y_q1: Vec<f64>,
+    pub y_median: Vec<f64>,
+    pub y_q3: Vec<f64>,
+    pub outliers: Vec<Vec<f64>>,
+
     // Original category names for x-axis (if categorical)
     pub x_categories: Option<Vec<String>>, 
     
@@ -107,6 +113,7 @@ pub enum RenderStyle {
     Point(PointStyle),
     Bar(BarStyle),
     Ribbon(RibbonStyle),
+    Boxplot(BoxplotStyle),
 }
 
 // =============================================================================
@@ -184,5 +191,18 @@ pub enum DrawCommand {
         points: Vec<(f64, f64)>,
         style: RibbonStyle,
         legend: Option<String>,
+    },
+    DrawBoxplot {
+        x: f64,
+        width: f64,
+        min: f64,
+        q1: f64,
+        median: f64,
+        q3: f64,
+        max: f64,
+        outliers: Vec<f64>,
+        style: BoxplotStyle,
+        legend: Option<String>,
+        is_vertical: bool,
     },
 }

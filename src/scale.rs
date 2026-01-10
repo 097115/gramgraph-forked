@@ -160,6 +160,20 @@ fn calculate_min_max_y(panel: &crate::ir::PanelData) -> MinMax {
                 if val < min { min = val; }
                 if val > max { max = val; }
             }
+            for &val in &group.y_min {
+                if val < min { min = val; }
+                if val > max { max = val; }
+            }
+            for &val in &group.y_max {
+                if val < min { min = val; }
+                if val > max { max = val; }
+            }
+            for outlier_set in &group.outliers {
+                for &val in outlier_set {
+                    if val < min { min = val; }
+                    if val > max { max = val; }
+                }
+            }
         }
     }
     
@@ -219,10 +233,14 @@ mod tests {
                     groups: vec![GroupData {
                         key: "A".to_string(),
                         x,
-                        y,
+                        y: y,
                         y_start: vec![],
                         y_min: vec![],
                         y_max: vec![],
+                        y_q1: vec![],
+                        y_median: vec![],
+                        y_q3: vec![],
+                        outliers: vec![],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],

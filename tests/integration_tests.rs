@@ -259,3 +259,12 @@ fn test_end_to_end_multiple_layers_grouped() {
     let png_bytes = result.unwrap();
     assert!(is_valid_png(&png_bytes));
 }
+
+#[test]
+fn test_end_to_end_boxplot() {
+    let csv = fs::read_to_string("fixtures/iris.csv").expect("Failed to read test CSV");
+    let result = run_gramgraph("aes(x: species, y: sepal_length) | boxplot()", &csv);
+    assert!(result.is_ok(), "Failed: {:?}", result.err());
+    let png_bytes = result.unwrap();
+    assert!(is_valid_png(&png_bytes));
+}

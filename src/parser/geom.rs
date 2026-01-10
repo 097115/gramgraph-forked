@@ -1,6 +1,6 @@
 // Geometry (geom) parser for Grammar of Graphics DSL
 
-use super::ast::{AestheticValue, BarLayer, BarPosition, Layer, LineLayer, PointLayer, RibbonLayer};
+use super::ast::{AestheticValue, BarLayer, BarPosition, BoxplotLayer, Layer, LineLayer, PointLayer, RibbonLayer};
 use super::lexer::{identifier, number_literal, string_literal, ws};
 use nom::{
     branch::alt,
@@ -316,9 +316,61 @@ pub fn parse_smooth(input: &str) -> IResult<&str, Layer> {
     Ok((input, Layer::Line(layer)))
 }
 
+/// Parse a boxplot geometry
+pub fn parse_boxplot(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("boxplot"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+
+    let (input, args) = separated_list0(
+        ws(char(',')),
+        alt((
+            map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
+            map(preceded(ws(tag("y:")), ws(identifier)), |y| ("y", ArgValue::ColumnName(y))),
+            
+            map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
+            map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
+            
+            map(preceded(ws(tag("width:")), ws(number_literal)), |w| ("width", ArgValue::NumericFixed(w))),
+            map(preceded(ws(tag("width:")), ws(identifier)), |w| ("width", ArgValue::NumericMapped(w))),
+            
+            map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
+            map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
+
+            // Outlier specific args
+            map(preceded(ws(tag("outlier_color:")), ws(string_literal)), |c| ("outlier_color", ArgValue::ColorFixed(c))),
+            map(preceded(ws(tag("outlier_size:")), ws(number_literal)), |s| ("outlier_size", ArgValue::NumericFixed(s))),
+            map(preceded(ws(tag("outlier_shape:")), ws(string_literal)), |sh| ("outlier_shape", ArgValue::ColorFixed(sh))),
+        ))
+    )(input)?;
+
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = BoxplotLayer::default();
+    layer.stat = crate::parser::ast::Stat::Boxplot;
+
+    for (key, val) in args {
+        match (key, val) {
+            ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
+            ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
+            ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
+            ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
+            ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
+            ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
+            ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
+            ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
+            ("outlier_color", ArgValue::ColorFixed(c)) => layer.outlier_color = Some(c),
+            ("outlier_size", ArgValue::NumericFixed(s)) => layer.outlier_size = Some(s),
+            ("outlier_shape", ArgValue::ColorFixed(sh)) => layer.outlier_shape = Some(sh),
+            _ => {}
+        }
+    }
+
+    Ok((input, Layer::Boxplot(layer)))
+}
+
 /// Parse any geometry layer
 pub fn parse_geom(input: &str) -> IResult<&str, Layer> {
-    alt((parse_line, parse_point, parse_bar, parse_ribbon, parse_histogram, parse_smooth))(input)
+    alt((parse_line, parse_point, parse_bar, parse_ribbon, parse_histogram, parse_smooth, parse_boxplot))(input)
 }
 
 #[cfg(test)]

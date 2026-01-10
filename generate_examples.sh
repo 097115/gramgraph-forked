@@ -55,4 +55,8 @@ cat examples/demographics.csv | cargo run -- 'aes(x: height, y: weight) | point(
 echo "Generating scale_reverse.png..."
 cat examples/timeseries.csv | cargo run -- 'aes(x: time, y: value, color: series) | line() | labs(title: "Reverse Time Axis") | scale_x_reverse()' > examples/scale_reverse.png
 
+# Boxplot
+echo "Generating boxplot.png..."
+cat examples/demographics.csv | cargo run -- 'aes(x: gender, y: height, color: gender) | boxplot()' > examples/boxplot.png
+
 echo "Done! All examples generated in the examples/ directory."

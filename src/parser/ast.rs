@@ -114,6 +114,7 @@ pub enum Stat {
     Bin { bins: usize },
     Count,
     Smooth { method: String },
+    Boxplot,
 }
 
 impl Default for Stat {
@@ -129,13 +130,14 @@ pub enum Layer {
     Point(PointLayer),
     Bar(BarLayer),
     Ribbon(RibbonLayer),
+    Boxplot(BoxplotLayer),
     // Future: Area, Histogram, etc.
 }
 
 impl Layer {
     /// Returns true if this layer type requires a categorical x-axis (e.g., Bar charts)
     pub fn requires_categorical_x(&self) -> bool {
-        matches!(self, Layer::Bar(_))
+        matches!(self, Layer::Bar(_) | Layer::Boxplot(_))
     }
 
     pub fn stat(&self) -> &Stat {
@@ -144,6 +146,7 @@ impl Layer {
             Layer::Point(p) => &p.stat,
             Layer::Bar(b) => &b.stat,
             Layer::Ribbon(r) => &r.stat,
+            Layer::Boxplot(b) => &b.stat,
         }
     }
 }
@@ -207,6 +210,26 @@ pub struct RibbonLayer {
     // Visual properties
     pub color: Option<AestheticValue<String>>, // Used for fill
     pub alpha: Option<AestheticValue<f64>>,
+}
+
+/// Boxplot geometry layer
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BoxplotLayer {
+    pub stat: Stat,
+    // Aesthetic overrides
+    pub x: Option<String>,
+    pub y: Option<String>,
+    
+    // Visual properties
+    pub color: Option<AestheticValue<String>>, // Border color
+    pub fill: Option<AestheticValue<String>>,  // Fill color
+    pub alpha: Option<AestheticValue<f64>>,
+    pub width: Option<AestheticValue<f64>>,    // Box width
+    
+    // Outlier properties
+    pub outlier_color: Option<String>,
+    pub outlier_size: Option<f64>,
+    pub outlier_shape: Option<String>,
 }
 
 /// Bar positioning modes (how bars are arranged)

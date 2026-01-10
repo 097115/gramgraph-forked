@@ -100,6 +100,14 @@ cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(alp
 
 ![Smoothing](examples/smooth.png)
 
+### Boxplot
+
+```bash
+cat examples/demographics.csv | gramgraph 'aes(x: gender, y: weight, color: gender) | boxplot()' > examples/boxplot.png
+```
+
+![Boxplot](examples/boxplot.png)
+
 ### Reverse Scale
 
 ```bash

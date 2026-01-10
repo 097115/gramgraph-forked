@@ -51,6 +51,7 @@ fn resolve_layer_aesthetics(
         Layer::Point(p) => extract_mapped_string(&p.color),
         Layer::Bar(b) => extract_mapped_string(&b.color),
         Layer::Ribbon(r) => extract_mapped_string(&r.color),
+        Layer::Boxplot(b) => extract_mapped_string(&b.color),
     }
     .or_else(|| global_aes.as_ref().and_then(|a| a.color.clone()));
 
@@ -60,6 +61,7 @@ fn resolve_layer_aesthetics(
         Layer::Point(p) => extract_mapped_string_from_f64(&p.size),
         Layer::Bar(b) => extract_mapped_string_from_f64(&b.width),
         Layer::Ribbon(_) => None,
+        Layer::Boxplot(b) => extract_mapped_string_from_f64(&b.width),
     }
     .or_else(|| global_aes.as_ref().and_then(|a| a.size.clone()));
 
@@ -76,6 +78,7 @@ fn resolve_layer_aesthetics(
         Layer::Point(p) => extract_mapped_string_from_f64(&p.alpha),
         Layer::Bar(b) => extract_mapped_string_from_f64(&b.alpha),
         Layer::Ribbon(r) => extract_mapped_string_from_f64(&r.alpha),
+        Layer::Boxplot(b) => extract_mapped_string_from_f64(&b.alpha),
     }
     .or_else(|| global_aes.as_ref().and_then(|a| a.alpha.clone()));
 
@@ -111,6 +114,7 @@ fn resolve_positional(layer: &Layer, global_aes: &Option<Aesthetics>) -> Result<
         Layer::Point(p) => (p.x.as_ref(), p.y.as_ref()),
         Layer::Bar(b) => (b.x.as_ref(), b.y.as_ref()),
         Layer::Ribbon(r) => (r.x.as_ref(), None), // Ribbon uses ymin/ymax primarily
+        Layer::Boxplot(b) => (b.x.as_ref(), b.y.as_ref()),
     };
 
     // Get x column

@@ -3,6 +3,8 @@ use crate::ir::{RenderData, ScaleSystem, ResolvedSpec, SceneGraph, PanelScene, D
 use crate::parser::ast::{Layer, BarPosition};
 use crate::RenderOptions;
 
+use std::collections::HashMap;
+
 /// Compile data and scales into a SceneGraph of drawing commands
 pub fn compile_geometry(
     data: RenderData, 
@@ -20,17 +22,34 @@ pub fn compile_geometry(
         // Iterate layers
         for (layer_idx, layer_data) in panel_data.layers.into_iter().enumerate() {
             // Retrieve original layer spec for metadata (position, etc.)
-            // Note: RenderData.layers aligns 1:1 with ResolvedSpec.layers
             let layer_spec = &spec.layers[layer_idx];
             
-            // Handle Bar Positioning Logic
-            // If Dodge, we need to know the total number of groups to calculate offsets
+            // Handle Positioning Logic
             let (_is_bar, position) = match &layer_spec.original_layer {
                 Layer::Bar(b) => (true, b.position.clone()),
+                Layer::Boxplot(_) => (true, BarPosition::Dodge),
                 _ => (false, BarPosition::Identity),
             };
 
-            let num_groups = layer_data.groups.len();
+            // Smart Dodging: Calculate occupancy per X coordinate
+            // Map: Quantized X -> List of Group Indices present at that X
+            let mut x_occupancy: HashMap<i64, Vec<usize>> = HashMap::new();
+            
+            if matches!(position, BarPosition::Dodge) {
+                for (g_idx, group) in layer_data.groups.iter().enumerate() {
+                    for &x in &group.x {
+                        // Quantize X to integer for categorical grouping logic
+                        // (Use round() to handle float imprecision)
+                        let key = x.round() as i64; 
+                        x_occupancy.entry(key).or_default().push(g_idx);
+                    }
+                }
+                // Sort groups at each X to ensure deterministic order (usually sorted by group key anyway)
+                for groups_at_x in x_occupancy.values_mut() {
+                    groups_at_x.sort(); 
+                    groups_at_x.dedup(); // Handle multiple points per group at same X (if any)
+                }
+            }
 
             for (group_idx, group) in layer_data.groups.into_iter().enumerate() {
                 match &group.style {
@@ -55,29 +74,33 @@ pub fn compile_geometry(
                         });
                     }
                     RenderStyle::Bar(style) => {
-                        // Bar Compilation
                         let bar_width_ratio = style.width.unwrap_or(0.8);
                         
-                        // Calculate Dodge parameters
-                        let (slot_width, x_offset_base) = if matches!(position, BarPosition::Dodge) {
-                            let slot = bar_width_ratio / num_groups as f64;
-                            let base = (group_idx as f64 - (num_groups as f64 - 1.0) / 2.0) * slot;
-                            (slot, base)
-                        } else {
-                            (bar_width_ratio, 0.0)
-                        };
-
-                        // Generate Rects
                         for i in 0..group.x.len() {
                             let x_center = group.x[i];
                             let y_top = group.y[i];
-                            let y_bottom = group.y_start[i]; // From transform (0.0 or stack base)
+                            let y_bottom = group.y_start[i];
                             
-                            // Apply Dodge to X
-                            let x_final = x_center + x_offset_base;
-                            
-                            // Rect coordinates (Top-Left, Bottom-Right) in data space
-                            // Note: Width is in data units. For categorical, 1 unit = 1 category.
+                            // Calculate Dodge Offset for this specific point
+                            let (slot_width, x_offset) = if matches!(position, BarPosition::Dodge) {
+                                let key = x_center.round() as i64;
+                                if let Some(occupants) = x_occupancy.get(&key) {
+                                    let num_at_x = occupants.len();
+                                    if let Some(rank) = occupants.iter().position(|&g| g == group_idx) {
+                                        let slot = bar_width_ratio / num_at_x as f64;
+                                        let offset = (rank as f64 - (num_at_x as f64 - 1.0) / 2.0) * slot;
+                                        (slot, offset)
+                                    } else {
+                                        (bar_width_ratio, 0.0) // Should not happen
+                                    }
+                                } else {
+                                    (bar_width_ratio, 0.0)
+                                }
+                            } else {
+                                (bar_width_ratio, 0.0)
+                            };
+
+                            let x_final = x_center + x_offset;
                             let half_width = slot_width / 2.0;
                             
                             let tl = (x_final - half_width, y_top);
@@ -93,8 +116,50 @@ pub fn compile_geometry(
                                 tl,
                                 br,
                                 style: style.clone(),
-                                legend: if i == 0 { Some(group.key.clone()) } else { None }, // Only legend once per group
+                                legend: if i == 0 { Some(group.key.clone()) } else { None },
                             });
+                        }
+                    }
+                    RenderStyle::Boxplot(style) => {
+                        let width_ratio = style.width.unwrap_or(0.5);
+
+                        for i in 0..group.x.len() {
+                             let x_center = group.x[i];
+                             
+                             // Calculate Dodge Offset for this specific point
+                             let (slot_width, x_offset) = if matches!(position, BarPosition::Dodge) {
+                                 let key = x_center.round() as i64;
+                                 if let Some(occupants) = x_occupancy.get(&key) {
+                                     let num_at_x = occupants.len();
+                                     if let Some(rank) = occupants.iter().position(|&g| g == group_idx) {
+                                         let slot = width_ratio / num_at_x as f64;
+                                         let offset = (rank as f64 - (num_at_x as f64 - 1.0) / 2.0) * slot;
+                                         (slot, offset)
+                                     } else {
+                                         (width_ratio, 0.0)
+                                     }
+                                 } else {
+                                     (width_ratio, 0.0)
+                                 }
+                             } else {
+                                 (width_ratio, 0.0)
+                             };
+
+                             let x_final = x_center + x_offset;
+
+                             commands.push(DrawCommand::DrawBoxplot {
+                                 x: x_final,
+                                 width: slot_width, 
+                                 min: group.y_min[i],
+                                 q1: group.y_q1[i],
+                                 median: group.y_median[i],
+                                 q3: group.y_q3[i],
+                                 max: group.y_max[i],
+                                 outliers: group.outliers[i].clone(),
+                                 style: style.clone(),
+                                 legend: if i == 0 { Some(group.key.clone()) } else { None },
+                                 is_vertical: !is_flipped,
+                             });
                         }
                     }
                     RenderStyle::Ribbon(style) => {
@@ -180,6 +245,10 @@ mod tests {
                         y_start: vec![0.0, 0.0],
                         y_min: vec![0.0, 0.0],
                         y_max: vec![10.0, 20.0],
+                        y_q1: vec![],
+                        y_median: vec![],
+                        y_q3: vec![],
+                        outliers: vec![],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],

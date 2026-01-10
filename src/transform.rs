@@ -164,10 +164,12 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
     // Logic: If ALL x values in this layer can be parsed as float, it's numeric.
     // UNLESS it's a Bar chart, which forces categorical.
     let is_bar = matches!(layer_spec.original_layer, Layer::Bar(_));
-    let all_x_strings: Vec<&String> = raw_groups.values().flat_map(|(x, _, _, _)| x.iter()).collect();
+    let is_boxplot = matches!(layer_spec.original_layer, Layer::Boxplot(_));
+    
+    let all_x_strings: Vec<&String> = raw_groups.values().flat_map(|d| d.x.iter()).collect();
     let all_numeric = all_x_strings.iter().all(|s| s.parse::<f64>().is_ok());
     
-    let use_categorical = is_bar || !all_numeric;
+    let use_categorical = is_bar || is_boxplot || !all_numeric;
 
     // 4. Normalize X Values
     // If categorical, we need a unified mapping for stacking/grouping
@@ -219,13 +221,23 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
 
     // Iterate groups in defined order (important for stacking order)
     for key in sorted_group_keys {
-        let (raw_x, raw_y, raw_ymin, raw_ymax) = raw_groups.get(&key).unwrap();
+        let stat_data = raw_groups.get(&key).unwrap();
+        let raw_x = &stat_data.x;
+        let raw_y = &stat_data.y;
+        let raw_ymin = &stat_data.ymin;
+        let raw_ymax = &stat_data.ymax;
         
         let mut x_floats = Vec::with_capacity(raw_x.len());
         let mut y_starts = Vec::with_capacity(raw_x.len());
         let mut y_ends = Vec::with_capacity(raw_x.len());
         let mut y_mins = Vec::with_capacity(raw_x.len());
         let mut y_maxs = Vec::with_capacity(raw_x.len());
+        
+        // Boxplot specific
+        let mut y_q1s = Vec::new();
+        let mut y_medians = Vec::new();
+        let mut y_q3s = Vec::new();
+        let mut outliers_vec = Vec::new();
 
         for (i, x_s) in raw_x.iter().enumerate() {
             let y_val = raw_y[i];
@@ -248,8 +260,8 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
                 let end = start + y_val;
                 stack_offsets.insert(stack_key, end);
                 (start, end, start, end)
-            } else if matches!(layer_spec.original_layer, Layer::Ribbon(_)) {
-                // Ribbon uses raw ymin/ymax
+            } else if matches!(layer_spec.original_layer, Layer::Ribbon(_)) || matches!(layer_spec.original_layer, Layer::Boxplot(_)) {
+                // Ribbon and Boxplot use raw ymin/ymax
                 (raw_min, raw_max, raw_min, raw_max)
             } else {
                 // Line/Point/Bar(unstacked)
@@ -260,6 +272,20 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
             y_ends.push(y_end);
             y_mins.push(y_min);
             y_maxs.push(y_max);
+            
+            // Collect boxplot stats if available
+            if let Some(bp) = &stat_data.boxplot {
+                y_q1s.push(bp.q1[i]);
+                y_medians.push(bp.median[i]);
+                y_q3s.push(bp.q3[i]);
+                outliers_vec.push(bp.outliers[i].clone());
+            } else {
+                 // Fill defaults to keep vectors aligned
+                 y_q1s.push(0.0);
+                 y_medians.push(0.0);
+                 y_q3s.push(0.0);
+                 outliers_vec.push(vec![]);
+            }
         }
 
         // Build Style
@@ -272,6 +298,12 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
             y_start: y_starts,
             y_min: y_mins,
             y_max: y_maxs,
+            
+            y_q1: y_q1s,
+            y_median: y_medians,
+            y_q3: y_q3s,
+            outliers: outliers_vec,
+
             x_categories: if use_categorical { Some(category_order.clone()) } else { None },
             style,
         });
@@ -362,24 +394,158 @@ fn build_style(
             color: pick_color(&r.color),
             alpha: pick_alpha(&r.alpha),
         }),
+        Layer::Boxplot(b) => RenderStyle::Boxplot(crate::graph::BoxplotStyle {
+            color: pick_color(&b.color),
+            width: pick_size(&b.width),
+            alpha: pick_alpha(&b.alpha),
+            outlier_color: b.outlier_color.clone(),
+            outlier_size: b.outlier_size,
+            outlier_shape: b.outlier_shape.clone(),
+        }),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BoxplotData {
+    q1: Vec<f64>,
+    median: Vec<f64>,
+    q3: Vec<f64>,
+    outliers: Vec<Vec<f64>>,
+}
+
+#[derive(Debug, Clone)]
+struct StatData {
+    x: Vec<String>,
+    y: Vec<f64>,
+    ymin: Vec<f64>,
+    ymax: Vec<f64>,
+    boxplot: Option<BoxplotData>,
+}
+
+impl StatData {
+    fn from_tuple(t: (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)) -> Self {
+        StatData {
+            x: t.0,
+            y: t.1,
+            ymin: t.2,
+            ymax: t.3,
+            boxplot: None,
+        }
+    }
+}
+
+fn compute_boxplot_stat(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>
+) -> Result<HashMap<String, StatData>> {
+    let mut new_groups = HashMap::new();
+
+    for (key, (x_strs, y_vals, _, _)) in groups {
+        // Group by X value
+        let mut x_groups: HashMap<String, Vec<f64>> = HashMap::new();
+        for (x, y) in x_strs.iter().zip(y_vals.iter()) {
+            x_groups.entry(x.clone()).or_default().push(*y);
+        }
+
+        let mut unique_x: Vec<String> = x_groups.keys().cloned().collect();
+        // Sort unique X? 
+        // We rely on numeric parsing if possible, or string sort.
+        // Let's replicate the sorting logic from process_layer loosely or just string sort.
+        // process_layer handles final sorting. Here we just need consistent order.
+        unique_x.sort();
+
+        let mut res_x = Vec::new();
+        let mut res_min = Vec::new();    // Lower whisker
+        let mut res_max = Vec::new();    // Upper whisker
+        let mut res_q1 = Vec::new();
+        let mut res_median = Vec::new();
+        let mut res_q3 = Vec::new();
+        let mut res_outliers = Vec::new();
+
+        for x_val in unique_x {
+            let mut ys = x_groups[&x_val].clone();
+            ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            
+            if ys.is_empty() { continue; }
+
+            let q1 = percentile(&ys, 0.25);
+            let median = percentile(&ys, 0.50);
+            let q3 = percentile(&ys, 0.75);
+            let iqr = q3 - q1;
+
+            let lower_fence = q1 - 1.5 * iqr;
+            let upper_fence = q3 + 1.5 * iqr;
+
+            // Whiskers: Range of data within fences
+            let lower_whisker = ys.iter().filter(|&&v| v >= lower_fence).min_by(|a,b| a.partial_cmp(b).unwrap()).unwrap_or(&q1);
+            let upper_whisker = ys.iter().filter(|&&v| v <= upper_fence).max_by(|a,b| a.partial_cmp(b).unwrap()).unwrap_or(&q3);
+
+            // Outliers
+            let outliers: Vec<f64> = ys.iter().filter(|&&v| v < lower_fence || v > upper_fence).cloned().collect();
+
+            res_x.push(x_val);
+            res_min.push(*lower_whisker);
+            res_max.push(*upper_whisker);
+            res_q1.push(q1);
+            res_median.push(median);
+            res_q3.push(q3);
+            res_outliers.push(outliers);
+        }
+
+        // Y in StatData usually represents the "main" value. For boxplot, maybe median?
+        // Or we just ignore Y and use the boxplot specific fields.
+        // Let's use median for Y so stacking/etc (if applied) does something sane-ish, though boxplots aren't usually stacked.
+        let res_y = res_median.clone();
+
+        new_groups.insert(key, StatData {
+            x: res_x,
+            y: res_y,
+            ymin: res_min,
+            ymax: res_max,
+            boxplot: Some(BoxplotData {
+                q1: res_q1,
+                median: res_median,
+                q3: res_q3,
+                outliers: res_outliers,
+            }),
+        });
+    }
+
+    Ok(new_groups)
+}
+
+fn percentile(sorted_data: &[f64], p: f64) -> f64 {
+    let n = sorted_data.len();
+    if n == 0 { return 0.0; }
+    if n == 1 { return sorted_data[0]; }
+
+    let rank = p * (n - 1) as f64;
+    let lower_idx = rank.floor() as usize;
+    let upper_idx = rank.ceil() as usize;
+    
+    if lower_idx == upper_idx {
+        sorted_data[lower_idx]
+    } else {
+        let weight = rank - lower_idx as f64;
+        sorted_data[lower_idx] * (1.0 - weight) + sorted_data[upper_idx] * weight
     }
 }
 
 fn apply_statistics(
     groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>, 
     stat: &Stat
-) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+) -> Result<HashMap<String, StatData>> {
     match stat {
-        Stat::Identity => Ok(groups),
+        Stat::Identity => Ok(groups.into_iter().map(|(k, v)| (k, StatData::from_tuple(v))).collect()),
         Stat::Bin { bins } => compute_bin_stat(groups, *bins),
         Stat::Count => compute_count_stat(groups),
         Stat::Smooth { method } => compute_smooth_stat(groups, method),
+        Stat::Boxplot => compute_boxplot_stat(groups),
     }
 }
 
 fn compute_count_stat(
     groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>
-) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+) -> Result<HashMap<String, StatData>> {
     let mut new_groups = HashMap::new();
     
     for (key, (x_strs, _, _, _)) in groups {
@@ -404,7 +570,7 @@ fn compute_count_stat(
             new_ymax.push(count);
         }
         
-        new_groups.insert(key, (new_x, new_y, new_ymin, new_ymax));
+        new_groups.insert(key, StatData::from_tuple((new_x, new_y, new_ymin, new_ymax)));
     }
     
     Ok(new_groups)
@@ -413,7 +579,7 @@ fn compute_count_stat(
 fn compute_smooth_stat(
     groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
     _method: &str
-) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+) -> Result<HashMap<String, StatData>> {
     let mut new_groups = HashMap::new();
     
     for (key, (x_strs, y_vals, _, _)) in groups {
@@ -440,8 +606,10 @@ fn compute_smooth_stat(
         
         let new_x = vec![min_x.to_string(), max_x.to_string()];
         let new_y = vec![slope * min_x + intercept, slope * max_x + intercept];
+        let new_ymin = new_y.clone();
+        let new_ymax = new_y.clone();
         
-        new_groups.insert(key, (new_x, new_y.clone(), new_y.clone(), new_y));
+        new_groups.insert(key, StatData::from_tuple((new_x, new_y, new_ymin, new_ymax)));
     }
     
     Ok(new_groups)
@@ -450,7 +618,7 @@ fn compute_smooth_stat(
 fn compute_bin_stat(
     groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
     bin_count: usize
-) -> Result<HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>> {
+) -> Result<HashMap<String, StatData>> {
     // 1. Collect all X values to determine range
     let mut all_values = Vec::new();
     for (x_strs, _, _, _) in groups.values() {
@@ -460,7 +628,7 @@ fn compute_bin_stat(
         }
     }
     
-    if all_values.is_empty() { return Ok(groups); }
+    if all_values.is_empty() { return Ok(groups.into_iter().map(|(k, v)| (k, StatData::from_tuple(v))).collect()); }
 
     let min = all_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
     let max = all_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
@@ -499,7 +667,7 @@ fn compute_bin_stat(
             new_ymax.push(count);
         }
         
-        new_groups.insert(key, (new_x, new_y, new_ymin, new_ymax));
+        new_groups.insert(key, StatData::from_tuple((new_x, new_y, new_ymin, new_ymax)));
     }
     
     Ok(new_groups)

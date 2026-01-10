@@ -17,13 +17,13 @@ This architecture enables powerful, declarative chart specifications with clean 
 
 ### ✅ Implemented
 
-- **Core Geometries**: `line()`, `point()`, `bar()`, `ribbon()` with full styling options
-- **Statistical Geoms**: `histogram(bins: n)`, `smooth()` (linear regression)
+- **Core Geometries**: `line()`, `point()`, `bar()`, `ribbon()`, `boxplot()` with full styling options
+- **Statistical Geoms**: `histogram(bins: n)`, `smooth()` (linear regression), `boxplot()`
 - **Data-Driven Aesthetics**: Automatic grouping by color, size, shape, or alpha with legends
 - **Faceting**: Multi-panel subplot grids with `facet_wrap()` and flexible axis scales
 - **Layer Composition**: Multiple geometries on shared coordinate space
-- **Bar Charts**: Categorical x-axis with dodge, stack, and identity positioning
-- **Statistical Transformations**: `bin`, `count`, `smooth`
+- **Bar/Boxplot Positioning**: Smart dodging (occupancy-based) for categorical axes
+- **Statistical Transformations**: `bin`, `count`, `smooth`, `boxplot` (5-number summary + outliers)
 - **Scales**: `scale_x_reverse()`, `scale_y_reverse()`, `xlim()`, `ylim()`, `scale_x_log10()`, `scale_y_log10()`
 - **Coordinates**: `coord_flip()` for horizontal charts
 - **Visual Customization**: `labs()` for titles/labels and `theme_minimal()` for styling
@@ -36,7 +36,7 @@ This architecture enables powerful, declarative chart specifications with clean 
 ### 🚀 Coming Soon
 
 - More statistical methods (loess smoothing)
-- Additional geometries (boxplot, violin, heatmap)
+- Additional geometries (violin, heatmap)
 - Custom legend configuration
 - More themes
 
@@ -92,6 +92,11 @@ cat data.csv | gramgraph 'aes(x: category, y: value) | bar() | coord_flip() | la
 cat data.csv | gramgraph 'aes(x: height, y: weight) | point(alpha: 0.5) | smooth()'
 ```
 
+**Boxplot:**
+```bash
+cat demographics.csv | gramgraph 'aes(x: gender, y: height, color: gender) | boxplot()'
+```
+
 **Ribbon Chart (Area with range):**
 ```bash
 cat data.csv | gramgraph 'aes(x: time, y: mean, ymin: lower, ymax: upper) | ribbon(alpha: 0.2) | line()'
@@ -113,6 +118,7 @@ Defines global aesthetic mappings.
 - `line(...)`: Line chart.
 - `point(...)`: Scatter plot.
 - `bar(...)`: Bar chart. Supports `position: "dodge" | "stack" | "identity"`.
+- `boxplot(...)`: Box and whisker plot with automatic outlier detection.
 - `ribbon(...)`: Filled area between `ymin` and `ymax`.
 - `histogram(...)`: Binning bar chart. Supports `bins: n`.
 - `smooth(...)`: Smoothing line (Linear Regression).

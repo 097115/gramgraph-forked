@@ -1,7 +1,7 @@
 // Pipeline parser for Grammar of Graphics DSL
 
 use super::aesthetics::parse_aesthetics;
-use super::ast::{Aesthetics, AxisScale, CoordSystem, Facet, Labels, Layer, PlotSpec, Theme};
+use super::ast::{Aesthetics, AxisScale, CoordSystem, Facet, Labels, Layer, PlotSpec, Theme, ThemeElement};
 use super::coord::parse_coord_flip;
 use super::facet::parse_facet_wrap;
 use super::geom::parse_geom;
@@ -17,6 +17,26 @@ use nom::{
     error::{Error, ErrorKind},
     IResult,
 };
+
+/// Merge two themes together (ggplot2-style).
+/// Fields from `overlay` override `base` unless they are `Inherit`.
+fn merge_themes(base: Theme, overlay: Theme) -> Theme {
+    Theme {
+        line: if overlay.line != ThemeElement::Inherit { overlay.line } else { base.line },
+        rect: if overlay.rect != ThemeElement::Inherit { overlay.rect } else { base.rect },
+        text: if overlay.text != ThemeElement::Inherit { overlay.text } else { base.text },
+        plot_background: if overlay.plot_background != ThemeElement::Inherit { overlay.plot_background } else { base.plot_background },
+        plot_title: if overlay.plot_title != ThemeElement::Inherit { overlay.plot_title } else { base.plot_title },
+        panel_background: if overlay.panel_background != ThemeElement::Inherit { overlay.panel_background } else { base.panel_background },
+        panel_grid_major: if overlay.panel_grid_major != ThemeElement::Inherit { overlay.panel_grid_major } else { base.panel_grid_major },
+        panel_grid_minor: if overlay.panel_grid_minor != ThemeElement::Inherit { overlay.panel_grid_minor } else { base.panel_grid_minor },
+        axis_text: if overlay.axis_text != ThemeElement::Inherit { overlay.axis_text } else { base.axis_text },
+        axis_line: if overlay.axis_line != ThemeElement::Inherit { overlay.axis_line } else { base.axis_line },
+        axis_ticks: if overlay.axis_ticks != ThemeElement::Inherit { overlay.axis_ticks } else { base.axis_ticks },
+        // legend_position always takes overlay (no Inherit concept for this field)
+        legend_position: overlay.legend_position,
+    }
+}
 
 #[derive(Debug)]
 enum PipelineComponent {
@@ -81,8 +101,11 @@ pub fn parse_plot_spec(input: &str) -> IResult<&str, PlotSpec> {
                 labels = Some(l);
             }
             PipelineComponent::Theme(t) => {
-                // Simple override for theme too
-                theme = Some(t);
+                // Merge themes (ggplot2-style: later values override earlier)
+                theme = Some(match theme {
+                    Some(base) => merge_themes(base, t),
+                    None => t,
+                });
             }
             PipelineComponent::Scale(is_x, s) => {
                 if is_x { x_scale = Some(s); } else { y_scale = Some(s); }

@@ -15,20 +15,100 @@ pub enum LegendPosition {
     None,
 }
 
+impl Default for LegendPosition {
+    fn default() -> Self {
+        LegendPosition::Right
+    }
+}
+
+// === Theme Element Primitives ===
+
+/// Line element styling (for axis lines, grid lines, tick marks)
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ElementLine {
+    pub color: Option<String>,
+    pub width: Option<f64>,
+    pub linetype: Option<String>, // "solid", "dashed", "dotted"
+}
+
+/// Rectangle element styling (for backgrounds, borders)
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ElementRect {
+    pub fill: Option<String>,
+    pub color: Option<String>,  // Border color
+    pub width: Option<f64>,     // Border width
+}
+
+/// Text element styling (for labels, titles)
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ElementText {
+    pub family: Option<String>,
+    pub color: Option<String>,
+    pub size: Option<f64>,
+    pub face: Option<String>,   // "plain", "bold", "italic"
+    pub angle: Option<f64>,
+    pub hjust: Option<f64>,     // Horizontal justification (0.0 - 1.0)
+    pub vjust: Option<f64>,     // Vertical justification (0.0 - 1.0)
+}
+
+/// Theme element wrapper - can be a specific element type, blank, or inherit from parent
+#[derive(Debug, Clone, PartialEq)]
+pub enum ThemeElement {
+    Line(ElementLine),
+    Rect(ElementRect),
+    Text(ElementText),
+    Blank,   // Remove this element entirely
+    Inherit, // Inherit from parent element in hierarchy
+}
+
+impl Default for ThemeElement {
+    fn default() -> Self {
+        ThemeElement::Inherit
+    }
+}
+
+// === Hierarchical Theme ===
+
+/// Complete theme specification with hierarchical element inheritance
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
-    pub background_color: Option<String>,
-    pub grid_visible: bool,
-    pub font_family: Option<String>,
+    // Root elements (base defaults for each type)
+    pub line: ThemeElement,
+    pub rect: ThemeElement,
+    pub text: ThemeElement,
+
+    // Plot-level elements
+    pub plot_background: ThemeElement,
+    pub plot_title: ThemeElement,
+
+    // Panel (drawing area) elements
+    pub panel_background: ThemeElement,
+    pub panel_grid_major: ThemeElement,
+    pub panel_grid_minor: ThemeElement,
+
+    // Axis elements
+    pub axis_text: ThemeElement,
+    pub axis_line: ThemeElement,
+    pub axis_ticks: ThemeElement,
+
+    // Legend
     pub legend_position: LegendPosition,
 }
 
 impl Default for Theme {
     fn default() -> Self {
         Theme {
-            background_color: None,
-            grid_visible: true,
-            font_family: None,
+            line: ThemeElement::Inherit,
+            rect: ThemeElement::Inherit,
+            text: ThemeElement::Inherit,
+            plot_background: ThemeElement::Inherit,
+            plot_title: ThemeElement::Inherit,
+            panel_background: ThemeElement::Inherit,
+            panel_grid_major: ThemeElement::Inherit,
+            panel_grid_minor: ThemeElement::Inherit,
+            axis_text: ThemeElement::Inherit,
+            axis_line: ThemeElement::Inherit,
+            axis_ticks: ThemeElement::Inherit,
             legend_position: LegendPosition::Right,
         }
     }

@@ -3,6 +3,7 @@ use image::ImageEncoder;
 use plotters::prelude::*;
 use crate::ir::{SceneGraph, PanelScene, DrawCommand};
 use crate::{OutputFormat, RenderOptions};
+use crate::theme_resolve::{ResolvedTheme, parse_color as resolve_color};
 
 /// Style configuration for line layers
 #[derive(Debug, Clone, Default)]
@@ -97,49 +98,56 @@ impl Canvas {
         Ok(buffer.into_bytes())
     }
 
-    fn draw_scene<DB: DrawingBackend>(root: &DrawingArea<DB, plotters::coord::Shift>, scene: &SceneGraph) -> Result<()> 
+    fn draw_scene<DB: DrawingBackend>(root: &DrawingArea<DB, plotters::coord::Shift>, scene: &SceneGraph) -> Result<()>
     where DB::ErrorType: 'static {
-        let bg_color = parse_color(&scene.theme.background_color, WHITE);
-        root.fill(&bg_color).context("Failed to fill background")?;
+        // Resolve theme once at the start
+        let resolved_theme = scene.theme.resolve();
+
+        // Fill background with resolved theme color
+        root.fill(&resolved_theme.plot_background.fill).context("Failed to fill background")?;
 
         // Determine Grid Layout
         let max_row = scene.panels.iter().map(|p| p.row).max().unwrap_or(0);
         let max_col = scene.panels.iter().map(|p| p.col).max().unwrap_or(0);
-        
+
         let rows = max_row + 1;
         let cols = max_col + 1;
 
         let areas = root.split_evenly((rows, cols));
 
-        // Draw Global Labels (Very basic implementation)
+        // Draw Global Title using resolved theme
         if let Some(title) = &scene.labels.title {
-                root.draw_text(title, &TextStyle::from(("sans-serif", 30).into_font()).color(&BLACK), (10, 10))?;
+            let title_style = TextStyle::from((
+                resolved_theme.plot_title.family.as_str(),
+                resolved_theme.plot_title.size as i32
+            ).into_font()).color(&resolved_theme.plot_title.color);
+            root.draw_text(title, &title_style, (10, 10))?;
         }
 
         for panel in &scene.panels {
             let area_idx = panel.row * cols + panel.col;
             if area_idx >= areas.len() { continue; }
-            
+
             let area = &areas[area_idx];
-            Canvas::draw_panel(area, panel, &scene.theme)?;
+            Canvas::draw_panel(area, panel, &resolved_theme)?;
         }
-        
+
         root.present().context("Failed to present drawing")?;
         Ok(())
     }
 
     fn draw_panel<DB: DrawingBackend>(
-        area: &DrawingArea<DB, plotters::coord::Shift>, 
+        area: &DrawingArea<DB, plotters::coord::Shift>,
         panel: &PanelScene,
-        theme: &crate::parser::ast::Theme,
-    ) -> Result<()> 
+        theme: &ResolvedTheme,
+    ) -> Result<()>
     where <DB as plotters::prelude::DrawingBackend>::ErrorType: 'static
     {
         let x_range = panel.x_scale.range.0..panel.x_scale.range.1;
         let y_range = panel.y_scale.range.0..panel.y_scale.range.1;
 
         let mut chart_builder = ChartBuilder::on(area);
-            
+
         chart_builder
             .margin(10)
             .caption(panel.title.clone().unwrap_or_default(), ("sans-serif", 15))
@@ -152,11 +160,53 @@ impl Canvas {
 
         // Configure Mesh & Labels
         let mut mesh = chart.configure_mesh();
-        
-        if !theme.grid_visible {
-            mesh.disable_mesh();
+
+        // Only apply custom styling if theme has explicit customizations
+        // Otherwise use Plotters defaults for backward compatibility
+        if theme.has_customization {
+            // Major Grid
+            match &theme.panel_grid_major {
+                Some(grid_style) => {
+                    let grid_color = grid_style.color.stroke_width(grid_style.width.ceil() as u32);
+                    mesh.bold_line_style(grid_color);
+                }
+                None => {
+                    // Blank - make transparent
+                    mesh.bold_line_style(RGBColor(255, 255, 255).mix(0.0));
+                }
+            }
+
+            // Minor Grid
+            match &theme.panel_grid_minor {
+                Some(grid_style) => {
+                    let grid_color = grid_style.color.stroke_width(grid_style.width.ceil() as u32);
+                    mesh.light_line_style(grid_color);
+                }
+                None => {
+                    // Blank - make transparent
+                    mesh.light_line_style(RGBColor(255, 255, 255).mix(0.0));
+                }
+            }
+
+            // Axis line styling
+            match &theme.axis_line {
+                Some(axis_style) => {
+                    mesh.axis_style(axis_style.color.stroke_width(axis_style.width.ceil() as u32));
+                }
+                None => {
+                    // Blank - hide axis lines
+                    mesh.axis_style(RGBColor(255, 255, 255).stroke_width(0));
+                }
+            }
+
+            // Axis text styling
+            let axis_text_style = TextStyle::from((
+                theme.axis_text.family.as_str(),
+                theme.axis_text.size as i32
+            ).into_font()).color(&theme.axis_text.color);
+            mesh.label_style(axis_text_style);
         }
-        
+
         if let Some(x_label) = &panel.x_label {
             mesh.x_desc(x_label);
         }
@@ -209,7 +259,7 @@ impl Canvas {
             match cmd {
                 DrawCommand::DrawLine { points, style, legend } => {
                     let color = parse_color(&style.color, BLUE);
-                    let stroke_width = style.width.unwrap_or(2.0) as u32;
+                    let stroke_width = style.width.unwrap_or(2.0).ceil() as u32;
                     let alpha = style.alpha.unwrap_or(1.0);
                     let color_style = color.mix(alpha).stroke_width(stroke_width);
 
@@ -281,42 +331,10 @@ impl Canvas {
     }
 }
 
-/// Parse color string to RGBColor
-
+/// Parse color string to RGBColor with hex color support
 fn parse_color(color_str: &Option<String>, default_color: RGBColor) -> RGBColor {
-
     match color_str.as_deref() {
-
-        Some("red") => RED,
-
-        Some("green") => GREEN,
-
-        Some("blue") => BLUE,
-
-        Some("black") => BLACK,
-
-        Some("yellow") => YELLOW,
-
-        Some("cyan") => CYAN,
-
-        Some("magenta") => MAGENTA,
-
-        Some("white") => WHITE,
-
-        Some("orange") => RGBColor(255, 165, 0),
-
-        Some("purple") => RGBColor(128, 0, 128),
-
-        Some("brown") => RGBColor(165, 42, 42),
-
-        Some("pink") => RGBColor(255, 192, 203),
-
-        Some("gray") => RGBColor(128, 128, 128),
-
-        Some("olive") => RGBColor(128, 128, 0),
-
-        _ => default_color,
-
+        Some(s) => resolve_color(s).unwrap_or(default_color),
+        None => default_color,
     }
-
 }

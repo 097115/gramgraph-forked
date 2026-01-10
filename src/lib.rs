@@ -13,6 +13,7 @@ pub mod resolve;
 pub mod transform;
 pub mod scale;
 pub mod compiler;
+pub mod theme_resolve;
 
 use serde::Deserialize;
 

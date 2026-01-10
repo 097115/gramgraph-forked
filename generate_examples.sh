@@ -59,4 +59,18 @@ cat examples/timeseries.csv | cargo run -- 'aes(x: time, y: value, color: series
 echo "Generating boxplot.png..."
 cat examples/demographics.csv | cargo run -- 'aes(x: gender, y: height, color: gender) | boxplot()' > examples/boxplot.png
 
+# --- Theme Examples ---
+
+# Custom Theme with Element Functions
+echo "Generating theme_custom.png..."
+cat examples/timeseries.csv | cargo run -- 'aes(x: time, y: value, color: series) | line() | labs(title: "Custom Styled Chart") | theme(plot_title: element_text(size: 24, color: "#2E86AB"), panel_grid_minor: element_blank(), axis_line: element_blank())' > examples/theme_custom.png
+
+# Dark Theme Example
+echo "Generating theme_dark.png..."
+cat examples/demographics.csv | cargo run -- 'aes(x: height, y: weight, color: gender) | point(size: 5) | labs(title: "Dark Theme Example") | theme(plot_background: element_rect(fill: "#1a1a2e"), panel_background: element_rect(fill: "#16213e"), text: element_text(color: "#eaeaea"), axis_text: element_text(color: "#a0a0a0"), panel_grid_minor: element_line(color: "#6e6e6e", width: 0.5), panel_grid_major: element_line(color: "white", width: 0.5), axis_line: element_line(color: "#ffffff", width: 1))' > examples/theme_dark.png
+
+# Merged Themes (theme_minimal + customization)
+echo "Generating theme_merged.png..."
+cat examples/financials.csv | cargo run -- 'aes(x: quarter, y: amount, color: type) | bar(position: "dodge") | labs(title: "Merged Theme Example") | theme_minimal() | theme(plot_title: element_text(size: 20, face: "bold"))' > examples/theme_merged.png
+
 echo "Done! All examples generated in the examples/ directory."

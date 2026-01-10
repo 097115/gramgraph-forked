@@ -26,7 +26,8 @@ This architecture enables powerful, declarative chart specifications with clean 
 - **Statistical Transformations**: `bin`, `count`, `smooth`, `boxplot` (5-number summary + outliers)
 - **Scales**: `scale_x_reverse()`, `scale_y_reverse()`, `xlim()`, `ylim()`, `scale_x_log10()`, `scale_y_log10()`
 - **Coordinates**: `coord_flip()` for horizontal charts
-- **Visual Customization**: `labs()` for titles/labels and `theme_minimal()` for styling
+- **Visual Customization**: `labs()` for titles/labels, `theme_minimal()` for presets
+- **Hierarchical Theme System**: `element_text()`, `element_line()`, `element_rect()`, `element_blank()` with inheritance
 - **Automatic Legends**: Generated for grouped visualizations
 - **Color Palettes**: Category10 scheme with 10 distinct colors
 - **Flexible Parsing**: Order-independent named arguments in DSL
@@ -38,7 +39,7 @@ This architecture enables powerful, declarative chart specifications with clean 
 - More statistical methods (loess smoothing)
 - Additional geometries (violin, heatmap)
 - Custom legend configuration
-- More themes
+- Additional preset themes (theme_dark, theme_classic)
 
 ## Architecture
 
@@ -139,8 +140,39 @@ Swaps X and Y axes. Useful for horizontal bar charts.
 - `xlim(min, max)`, `ylim(min, max)`
 
 #### Themes
-- `theme_minimal()`: Clean, white background theme.
-- `theme(legend_position: "right" | "bottom" | "none")`
+
+GramGraph implements a hierarchical theme system inspired by ggplot2, using element primitives.
+
+**Preset Themes:**
+- `theme_minimal()`: Clean, white background, no axis lines/ticks, light grid.
+
+**Element Functions:**
+- `element_text(size: n, color: "...", family: "...", face: "bold|italic", angle: n)` - Text styling
+- `element_line(color: "...", width: n, linetype: "solid|dashed|dotted")` - Line styling
+- `element_rect(fill: "...", color: "...", width: n)` - Rectangle styling (backgrounds)
+- `element_blank()` - Remove an element entirely
+
+**Theme Properties:**
+- `plot_background`: Canvas background (element_rect)
+- `panel_background`: Drawing area background (element_rect)
+- `plot_title`: Title text styling (element_text)
+- `panel_grid_major`: Major grid lines (element_line or element_blank)
+- `panel_grid_minor`: Minor grid lines (element_line or element_blank)
+- `axis_text`: Axis label styling (element_text)
+- `axis_line`: Axis line styling (element_line or element_blank)
+- `axis_ticks`: Tick mark styling (element_line or element_blank)
+- `legend_position`: "right" | "left" | "top" | "bottom" | "none"
+
+**Color Formats:**
+- Named colors: "red", "blue", "gray", "white", etc.
+- Hex colors: "#FF0000", "#2E86AB", "#F00"
+- Gray scale: "gray0" (black) to "gray100" (white)
+
+**Theme Merging:**
+Multiple `theme()` calls are merged (ggplot2-style), allowing customization on top of presets:
+```bash
+theme_minimal() | theme(plot_title: element_text(size: 24, face: "bold"))
+```
 
 #### `facet_wrap(by: column, ...)`
 Creates small multiples.
@@ -166,11 +198,12 @@ src/
 ├── scale.rs             # Phase 3: Scale Calculation (Ranges/Categories)
 ├── compiler.rs          # Phase 4: Compile to SceneGraph (Draw Commands)
 ├── graph.rs             # Phase 5: Rendering Backend (Plotters)
+├── theme_resolve.rs     # Theme Resolution Engine (Inheritance/Defaults)
 ├── palette.rs           # Color/size/shape palettes
 ├── runtime.rs           # Pipeline Coordinator
 └── parser/              # Grammar of Graphics parser
     ├── mod.rs           # Public API exports
-    ├── ast.rs           # AST types
+    ├── ast.rs           # AST types (includes Theme element primitives)
     ├── lexer.rs         # Token parsing
     ├── aesthetics.rs    # Parse aes()
     ├── geom.rs          # Parse geom(), histogram(), smooth()
@@ -178,7 +211,7 @@ src/
     ├── coord.rs         # Parse coord_flip()
     ├── labels.rs        # Parse labs()
     ├── scale.rs         # Parse scale_*()
-    ├── theme.rs         # Parse theme()
+    ├── theme.rs         # Parse theme(), element_*()
     └── pipeline.rs      # Parse full pipeline
 ```
 

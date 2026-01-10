@@ -79,7 +79,7 @@ cat examples/distribution.csv | gramgraph 'aes(x: value) | histogram(bins: 25) |
 ### Horizontal Bar Chart (Coord Flip)
 
 ```bash
-cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type) | bar(position: "dodge") | coord_flip() | labs(title: "Financials (Horizontal)")' > examples/coord_flip.png
+cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type) | bar(position: "dodge") | coord_flip() | labs(title: "Financials (Horizontal)", subtitle: "Q1-Q4 Performance")' > examples/coord_flip.png
 ```
 
 ![Horizontal Bar Chart](examples/coord_flip.png)
@@ -87,7 +87,7 @@ cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type)
 ### Ribbon Chart
 
 ```bash
-cat examples/ribbon_data.csv | gramgraph 'aes(x: x, y: y, ymin: lower, ymax: upper) | ribbon(color: "blue", alpha: 0.3) | line(color: "blue") | labs(title: "Model Prediction")' > examples/ribbon.png
+cat examples/ribbon_data.csv | gramgraph 'aes(x: x, y: y, ymin: lower, ymax: upper) | ribbon(color: "blue", alpha: 0.3) | line(color: "blue") | labs(title: "Model Prediction", caption: "Shaded area represents 95% CI") | theme_minimal()' > examples/ribbon.png
 ```
 
 ![Ribbon Chart](examples/ribbon.png)
@@ -95,7 +95,7 @@ cat examples/ribbon_data.csv | gramgraph 'aes(x: x, y: y, ymin: lower, ymax: upp
 ### Smoothing (Linear Regression)
 
 ```bash
-cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(alpha: 0.5) | smooth() | labs(title: "Linear Fit")' > examples/smooth.png
+cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(alpha: 0.5) | smooth() | labs(title: "Height vs Weight", subtitle: "Linear Regression Fit")' > examples/smooth.png
 ```
 
 ![Smoothing](examples/smooth.png)
@@ -103,7 +103,7 @@ cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(alp
 ### Boxplot
 
 ```bash
-cat examples/demographics.csv | gramgraph 'aes(x: gender, y: weight, color: gender) | boxplot()' > examples/boxplot.png
+cat examples/demographics.csv | gramgraph 'aes(x: gender, y: height, color: gender) | boxplot()' > examples/boxplot.png
 ```
 
 ![Boxplot](examples/boxplot.png)
@@ -115,6 +115,30 @@ cat examples/timeseries.csv | gramgraph 'aes(x: time, y: value, color: series) |
 ```
 
 ![Reverse Scale](examples/scale_reverse.png)
+
+### Custom Theme with Element Functions
+
+```bash
+cat examples/timeseries.csv | gramgraph 'aes(x: time, y: value, color: series) | line() | labs(title: "Custom Styled Chart") | theme(plot_title: element_text(size: 24, color: "#2E86AB"), panel_grid_minor: element_blank(), axis_line: element_blank())' > examples/theme_custom.png
+```
+
+![Custom Theme](examples/theme_custom.png)
+
+### Dark Theme Example
+
+```bash
+cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight, color: gender) | point(size: 5) | labs(title: "Dark Theme Example") | theme(plot_background: element_rect(fill: "#1a1a2e"), panel_background: element_rect(fill: "#16213e"), text: element_text(color: "#eaeaea"), axis_text: element_text(color: "#a0a0a0"), panel_grid_minor: element_line(color: "#6e6e6e", width: 0.5), panel_grid_major: element_line(color: "white", width: 0.5), axis_line: element_line(color: "#ffffff", width: 1))' > examples/theme_dark.png
+```
+
+![Dark Theme](examples/theme_dark.png)
+
+### Merged Themes
+
+```bash
+cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type) | bar(position: "dodge") | labs(title: "Merged Theme Example") | theme_minimal() | theme(plot_title: element_text(size: 20, face: "bold"))' > examples/theme_merged.png
+```
+
+![Merged Theme](examples/theme_merged.png)
 
 ## Installation
 

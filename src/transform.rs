@@ -4,7 +4,7 @@ use crate::data::PlotData;
 use crate::ir::{RenderData, PanelData, LayerData, GroupData, FacetLayout, RenderStyle};
 use crate::ir::{ResolvedSpec, ResolvedLayer, ResolvedAesthetics, ResolvedFacet};
 use crate::parser::ast::{Layer, BarPosition, Stat};
-use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle};
+use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle, ViolinStyle};
 use crate::palette::{ColorPalette, SizePalette, ShapePalette};
 
 /// Main entry point: Transform resolved spec and CSV data into renderable data
@@ -165,11 +165,12 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
     // UNLESS it's a Bar chart, which forces categorical.
     let is_bar = matches!(layer_spec.original_layer, Layer::Bar(_));
     let is_boxplot = matches!(layer_spec.original_layer, Layer::Boxplot(_));
-    
+    let is_violin = matches!(layer_spec.original_layer, Layer::Violin(_));
+
     let all_x_strings: Vec<&String> = raw_groups.values().flat_map(|d| d.x.iter()).collect();
     let all_numeric = all_x_strings.iter().all(|s| s.parse::<f64>().is_ok());
-    
-    let use_categorical = is_bar || is_boxplot || !all_numeric;
+
+    let use_categorical = is_bar || is_boxplot || is_violin || !all_numeric;
 
     // 4. Normalize X Values
     // If categorical, we need a unified mapping for stacking/grouping
@@ -239,6 +240,11 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
         let mut y_q3s = Vec::new();
         let mut outliers_vec = Vec::new();
 
+        // Violin specific
+        let mut violin_density_vec: Vec<Vec<f64>> = Vec::new();
+        let mut violin_density_y_vec: Vec<Vec<f64>> = Vec::new();
+        let mut violin_quantile_values_vec: Vec<Vec<f64>> = Vec::new();
+
         for (i, x_s) in raw_x.iter().enumerate() {
             let y_val = raw_y[i];
             let raw_min = raw_ymin[i];
@@ -260,8 +266,8 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
                 let end = start + y_val;
                 stack_offsets.insert(stack_key, end);
                 (start, end, start, end)
-            } else if matches!(layer_spec.original_layer, Layer::Ribbon(_)) || matches!(layer_spec.original_layer, Layer::Boxplot(_)) {
-                // Ribbon and Boxplot use raw ymin/ymax
+            } else if matches!(layer_spec.original_layer, Layer::Ribbon(_)) || matches!(layer_spec.original_layer, Layer::Boxplot(_)) || matches!(layer_spec.original_layer, Layer::Violin(_)) {
+                // Ribbon, Boxplot, and Violin use raw ymin/ymax
                 (raw_min, raw_max, raw_min, raw_max)
             } else {
                 // Line/Point/Bar(unstacked)
@@ -286,6 +292,17 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
                  y_q3s.push(0.0);
                  outliers_vec.push(vec![]);
             }
+
+            // Collect violin stats if available
+            if let Some(vp) = &stat_data.violin {
+                violin_density_vec.push(vp.density[i].clone());
+                violin_density_y_vec.push(vp.density_y[i].clone());
+                violin_quantile_values_vec.push(vp.quantile_values[i].clone());
+            } else {
+                violin_density_vec.push(vec![]);
+                violin_density_y_vec.push(vec![]);
+                violin_quantile_values_vec.push(vec![]);
+            }
         }
 
         // Build Style
@@ -298,11 +315,15 @@ fn process_layer(layer_spec: &ResolvedLayer, data: &PlotData) -> Result<LayerDat
             y_start: y_starts,
             y_min: y_mins,
             y_max: y_maxs,
-            
+
             y_q1: y_q1s,
             y_median: y_medians,
             y_q3: y_q3s,
             outliers: outliers_vec,
+
+            violin_density: violin_density_vec,
+            violin_density_y: violin_density_y_vec,
+            violin_quantile_values: violin_quantile_values_vec,
 
             x_categories: if use_categorical { Some(category_order.clone()) } else { None },
             style,
@@ -402,6 +423,12 @@ fn build_style(
             outlier_size: b.outlier_size,
             outlier_shape: b.outlier_shape.clone(),
         }),
+        Layer::Violin(v) => RenderStyle::Violin(ViolinStyle {
+            color: pick_color(&v.color),
+            width: pick_size(&v.width),
+            alpha: pick_alpha(&v.alpha),
+            draw_quantiles: v.draw_quantiles.clone(),
+        }),
     }
 }
 
@@ -414,12 +441,20 @@ struct BoxplotData {
 }
 
 #[derive(Debug, Clone)]
+struct ViolinData {
+    density: Vec<Vec<f64>>,           // Normalized density values (0-1) per x category
+    density_y: Vec<Vec<f64>>,         // Y coordinates for density curve per x category
+    quantile_values: Vec<Vec<f64>>,   // Computed Y values at requested quantiles per x category
+}
+
+#[derive(Debug, Clone)]
 struct StatData {
     x: Vec<String>,
     y: Vec<f64>,
     ymin: Vec<f64>,
     ymax: Vec<f64>,
     boxplot: Option<BoxplotData>,
+    violin: Option<ViolinData>,
 }
 
 impl StatData {
@@ -430,6 +465,7 @@ impl StatData {
             ymin: t.2,
             ymax: t.3,
             boxplot: None,
+            violin: None,
         }
     }
 }
@@ -507,6 +543,156 @@ fn compute_boxplot_stat(
                 q3: res_q3,
                 outliers: res_outliers,
             }),
+            violin: None,
+        });
+    }
+
+    Ok(new_groups)
+}
+
+/// Silverman's rule of thumb for bandwidth selection
+fn silverman_bandwidth(data: &[f64]) -> f64 {
+    let n = data.len() as f64;
+    if n < 2.0 { return 1.0; }
+
+    let mean = data.iter().sum::<f64>() / n;
+    let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let std_dev = variance.sqrt();
+
+    // IQR-based estimate for robustness
+    let mut sorted = data.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let q1 = percentile(&sorted, 0.25);
+    let q3 = percentile(&sorted, 0.75);
+    let iqr = q3 - q1;
+
+    // Silverman's rule: h = 0.9 * min(std, IQR/1.34) * n^(-1/5)
+    let scale = if iqr > 0.0 { std_dev.min(iqr / 1.34) } else { std_dev };
+    if scale <= 0.0 { return 1.0; }
+    0.9 * scale * n.powf(-0.2)
+}
+
+/// Gaussian kernel function
+fn gaussian_kernel(u: f64) -> f64 {
+    const SQRT_2PI: f64 = 2.5066282746310002;
+    (-0.5 * u * u).exp() / SQRT_2PI
+}
+
+/// Compute Gaussian KDE at grid points
+fn compute_kde(data: &[f64], bandwidth: f64) -> (Vec<f64>, Vec<f64>) {
+    const GRID_POINTS: usize = 128;  // Resolution of density curve
+
+    let n = data.len() as f64;
+    if n == 0.0 { return (vec![], vec![]); }
+
+    let min_y = data.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+    let max_y = data.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+
+    // Extend range slightly for smooth edges
+    let extend = 3.0 * bandwidth;
+    let y_start = min_y - extend;
+    let y_end = max_y + extend;
+
+    let range = y_end - y_start;
+    if range <= 0.0 { return (vec![min_y], vec![1.0]); }
+
+    let step = range / (GRID_POINTS - 1) as f64;
+    let mut grid_y = Vec::with_capacity(GRID_POINTS);
+    let mut density = Vec::with_capacity(GRID_POINTS);
+
+    for i in 0..GRID_POINTS {
+        let y = y_start + i as f64 * step;
+        grid_y.push(y);
+
+        // Gaussian kernel density estimation
+        let mut d = 0.0;
+        for &xi in data {
+            let u = (y - xi) / bandwidth;
+            d += gaussian_kernel(u);
+        }
+        d /= n * bandwidth;
+        density.push(d);
+    }
+
+    // Normalize density to 0-1 range for rendering
+    let max_density = density.iter().fold(0.0f64, |a, &b| a.max(b));
+    if max_density > 0.0 {
+        for d in &mut density {
+            *d /= max_density;
+        }
+    }
+
+    (grid_y, density)
+}
+
+/// Compute violin statistics using KDE
+fn compute_violin_stat(
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
+    draw_quantiles: &[f64],
+) -> Result<HashMap<String, StatData>> {
+    let mut new_groups = HashMap::new();
+
+    for (key, (x_strs, y_vals, _, _)) in groups {
+        // Group by X value (category)
+        let mut x_groups: HashMap<String, Vec<f64>> = HashMap::new();
+        for (x, y) in x_strs.iter().zip(y_vals.iter()) {
+            x_groups.entry(x.clone()).or_default().push(*y);
+        }
+
+        let mut unique_x: Vec<String> = x_groups.keys().cloned().collect();
+        unique_x.sort();
+
+        let mut res_x = Vec::new();
+        let mut res_y = Vec::new();     // Will hold median for y
+        let mut res_min = Vec::new();
+        let mut res_max = Vec::new();
+        let mut density_vec = Vec::new();
+        let mut density_y_vec = Vec::new();
+        let mut quantile_values_vec = Vec::new();
+
+        for x_val in unique_x {
+            let ys = &x_groups[&x_val];
+            if ys.is_empty() { continue; }
+
+            let mut sorted_ys = ys.clone();
+            sorted_ys.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+            let min_y = sorted_ys[0];
+            let max_y = sorted_ys[sorted_ys.len() - 1];
+            let median = percentile(&sorted_ys, 0.5);
+
+            // Compute bandwidth using Silverman's rule
+            let bandwidth = silverman_bandwidth(&sorted_ys);
+
+            // Compute KDE
+            let (grid_y, density) = compute_kde(&sorted_ys, bandwidth);
+
+            // Compute actual data percentiles for requested quantiles
+            let quantile_y_values: Vec<f64> = draw_quantiles
+                .iter()
+                .map(|&q| percentile(&sorted_ys, q))
+                .collect();
+
+            res_x.push(x_val);
+            res_y.push(median);
+            res_min.push(min_y);
+            res_max.push(max_y);
+            density_vec.push(density);
+            density_y_vec.push(grid_y);
+            quantile_values_vec.push(quantile_y_values);
+        }
+
+        new_groups.insert(key, StatData {
+            x: res_x,
+            y: res_y,
+            ymin: res_min,
+            ymax: res_max,
+            boxplot: None,
+            violin: Some(ViolinData {
+                density: density_vec,
+                density_y: density_y_vec,
+                quantile_values: quantile_values_vec,
+            }),
         });
     }
 
@@ -531,7 +717,7 @@ fn percentile(sorted_data: &[f64], p: f64) -> f64 {
 }
 
 fn apply_statistics(
-    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>, 
+    groups: HashMap<String, (Vec<String>, Vec<f64>, Vec<f64>, Vec<f64>)>,
     stat: &Stat
 ) -> Result<HashMap<String, StatData>> {
     match stat {
@@ -540,6 +726,7 @@ fn apply_statistics(
         Stat::Count => compute_count_stat(groups),
         Stat::Smooth { method } => compute_smooth_stat(groups, method),
         Stat::Boxplot => compute_boxplot_stat(groups),
+        Stat::Violin { draw_quantiles } => compute_violin_stat(groups, draw_quantiles),
     }
 }
 

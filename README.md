@@ -108,6 +108,14 @@ cat examples/demographics.csv | gramgraph 'aes(x: gender, y: height, color: gend
 
 ![Boxplot](examples/boxplot.png)
 
+### Violin Plot
+
+```bash
+cat examples/demographics.csv | gramgraph 'aes(x: gender, y: height, color: gender) | violin(draw_quantiles: [0.25, 0.5, 0.75]) | theme_minimal()' > examples/violin.png
+```
+
+![Violin Plot](examples/violin.png)
+
 ### Reverse Scale
 
 ```bash

@@ -200,6 +200,7 @@ pub enum Stat {
     Count,
     Smooth { method: String },
     Boxplot,
+    Violin { draw_quantiles: Vec<f64> },
 }
 
 impl Default for Stat {
@@ -216,13 +217,13 @@ pub enum Layer {
     Bar(BarLayer),
     Ribbon(RibbonLayer),
     Boxplot(BoxplotLayer),
-    // Future: Area, Histogram, etc.
+    Violin(ViolinLayer),
 }
 
 impl Layer {
     /// Returns true if this layer type requires a categorical x-axis (e.g., Bar charts)
     pub fn requires_categorical_x(&self) -> bool {
-        matches!(self, Layer::Bar(_) | Layer::Boxplot(_))
+        matches!(self, Layer::Bar(_) | Layer::Boxplot(_) | Layer::Violin(_))
     }
 
     pub fn stat(&self) -> &Stat {
@@ -232,6 +233,7 @@ impl Layer {
             Layer::Bar(b) => &b.stat,
             Layer::Ribbon(r) => &r.stat,
             Layer::Boxplot(b) => &b.stat,
+            Layer::Violin(v) => &v.stat,
         }
     }
 }
@@ -304,17 +306,34 @@ pub struct BoxplotLayer {
     // Aesthetic overrides
     pub x: Option<String>,
     pub y: Option<String>,
-    
+
     // Visual properties
     pub color: Option<AestheticValue<String>>, // Border color
     pub fill: Option<AestheticValue<String>>,  // Fill color
     pub alpha: Option<AestheticValue<f64>>,
     pub width: Option<AestheticValue<f64>>,    // Box width
-    
+
     // Outlier properties
     pub outlier_color: Option<String>,
     pub outlier_size: Option<f64>,
     pub outlier_shape: Option<String>,
+}
+
+/// Violin geometry layer
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ViolinLayer {
+    pub stat: Stat,
+    // Aesthetic overrides
+    pub x: Option<String>,
+    pub y: Option<String>,
+
+    // Visual properties
+    pub color: Option<AestheticValue<String>>,
+    pub alpha: Option<AestheticValue<f64>>,
+    pub width: Option<AestheticValue<f64>>,    // Violin width (0.0-1.0)
+
+    // Violin-specific options
+    pub draw_quantiles: Vec<f64>,  // Quantile lines to draw inside violin (e.g., [0.25, 0.5, 0.75])
 }
 
 /// Bar positioning modes (how bars are arranged)

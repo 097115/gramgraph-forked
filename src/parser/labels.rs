@@ -8,7 +8,7 @@ use nom::{
     IResult,
 };
 use crate::parser::ast::Labels;
-use crate::parser::lexer::{identifier, string_literal, ws};
+use crate::parser::lexer::{string_literal, ws};
 
 pub fn parse_labs(input: &str) -> IResult<&str, Labels> {
     let (input, _) = ws(tag("labs"))(input)?;

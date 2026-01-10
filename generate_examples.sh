@@ -59,6 +59,10 @@ cat examples/timeseries.csv | cargo run -- 'aes(x: time, y: value, color: series
 echo "Generating boxplot.png..."
 cat examples/demographics.csv | cargo run -- 'aes(x: gender, y: height, color: gender) | boxplot()' > examples/boxplot.png
 
+# Violin Plot
+echo "Generating violin.png..."
+cat examples/demographics.csv | cargo run -- 'aes(x: gender, y: height, color: gender) | violin(draw_quantiles: [0.25, 0.5, 0.75]) | theme_minimal()' > examples/violin.png
+
 # --- Theme Examples ---
 
 # Custom Theme with Element Functions

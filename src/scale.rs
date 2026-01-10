@@ -57,7 +57,7 @@ pub fn build_scales(data: &RenderData, spec: &ResolvedSpec) -> Result<ScaleSyste
             }
         } else {
             // Continuous Scale
-            let (mut min, mut max) = if let Some(s) = &spec.x_scale_spec {
+            let (min, max) = if let Some(s) = &spec.x_scale_spec {
                 if let Some((lmin, lmax)) = s.limits { (lmin, lmax) }
                 else { pad_range(x_mm.min, x_mm.max) }
             } else { pad_range(x_mm.min, x_mm.max) };
@@ -73,7 +73,7 @@ pub fn build_scales(data: &RenderData, spec: &ResolvedSpec) -> Result<ScaleSyste
         };
 
         // Y-Axis
-        let (mut min, mut max) = if let Some(s) = &spec.y_scale_spec {
+        let (min, max) = if let Some(s) = &spec.y_scale_spec {
             if let Some((lmin, lmax)) = s.limits { (lmin, lmax) }
             else { pad_range(y_mm.min, y_mm.max) }
         } else { pad_range(y_mm.min, y_mm.max) };
@@ -241,6 +241,9 @@ mod tests {
                         y_median: vec![],
                         y_q3: vec![],
                         outliers: vec![],
+                        violin_density: vec![],
+                        violin_density_y: vec![],
+                        violin_quantile_values: vec![],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],

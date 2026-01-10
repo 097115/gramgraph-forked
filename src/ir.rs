@@ -1,5 +1,5 @@
 use crate::parser::ast::Layer;
-use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle, BoxplotStyle};
+use crate::graph::{LineStyle, PointStyle, BarStyle, RibbonStyle, BoxplotStyle, ViolinStyle};
 
 // =============================================================================
 // Phase 1: Resolution
@@ -100,6 +100,11 @@ pub struct GroupData {
     pub y_q3: Vec<f64>,
     pub outliers: Vec<Vec<f64>>,
 
+    // Violin statistics (KDE density curves)
+    pub violin_density: Vec<Vec<f64>>,          // Normalized density values (0-1) per x category
+    pub violin_density_y: Vec<Vec<f64>>,        // Y coordinates for density curve per x category
+    pub violin_quantile_values: Vec<Vec<f64>>,  // Computed Y values at requested quantiles per x category
+
     // Original category names for x-axis (if categorical)
     pub x_categories: Option<Vec<String>>, 
     
@@ -114,6 +119,7 @@ pub enum RenderStyle {
     Bar(BarStyle),
     Ribbon(RibbonStyle),
     Boxplot(BoxplotStyle),
+    Violin(ViolinStyle),
 }
 
 // =============================================================================

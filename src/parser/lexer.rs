@@ -1,7 +1,7 @@
 // Lexer utilities for GramGraph DSL
 
 use nom::{
-    bytes::complete::{tag, take_while1},
+    bytes::complete::{take_while1},
     character::complete::{char, multispace0},
     combinator::recognize,
     number::complete::double,
@@ -52,6 +52,7 @@ pub fn number_literal(input: &str) -> IResult<&str, f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nom::bytes::complete::tag;
 
     #[test]
     fn test_identifier() {

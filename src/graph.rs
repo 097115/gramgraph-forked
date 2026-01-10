@@ -48,6 +48,15 @@ pub struct BoxplotStyle {
     pub outlier_shape: Option<String>,
 }
 
+/// Style configuration for violin layers
+#[derive(Debug, Clone, Default)]
+pub struct ViolinStyle {
+    pub color: Option<String>,
+    pub width: Option<f64>,
+    pub alpha: Option<f64>,
+    pub draw_quantiles: Vec<f64>,
+}
+
 /// The Rendering Backend
 pub struct Canvas;
 

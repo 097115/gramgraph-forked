@@ -2,8 +2,8 @@ use nom::{
     bytes::complete::tag,
     character::complete::char,
     branch::alt,
-    combinator::{map, opt},
-    sequence::{preceded, delimited},
+    combinator::{map},
+    sequence::{delimited},
     IResult,
 };
 use crate::parser::ast::{AxisScale, ScaleType};

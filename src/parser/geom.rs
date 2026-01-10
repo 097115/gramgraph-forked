@@ -1,6 +1,6 @@
 // Geometry (geom) parser for Grammar of Graphics DSL
 
-use super::ast::{AestheticValue, BarLayer, BarPosition, BoxplotLayer, Layer, LineLayer, PointLayer, RibbonLayer};
+use super::ast::{AestheticValue, BarLayer, BarPosition, BoxplotLayer, Layer, LineLayer, PointLayer, RibbonLayer, ViolinLayer};
 use super::lexer::{identifier, number_literal, string_literal, ws};
 use nom::{
     branch::alt,
@@ -19,6 +19,15 @@ enum ArgValue {
     ColorMapped(String),       // color: region (column)
     NumericFixed(f64),         // width: 2, alpha: 0.5
     NumericMapped(String),     // width: size_col, alpha: alpha_col
+    NumberArray(Vec<f64>),     // draw_quantiles: [0.25, 0.5, 0.75]
+}
+
+/// Parse a number array like [0.25, 0.5, 0.75]
+fn parse_number_array(input: &str) -> IResult<&str, Vec<f64>> {
+    let (input, _) = ws(char('['))(input)?;
+    let (input, nums) = separated_list0(ws(char(',')), ws(number_literal))(input)?;
+    let (input, _) = ws(char(']'))(input)?;
+    Ok((input, nums))
 }
 
 /// Parse a line geometry
@@ -368,9 +377,60 @@ pub fn parse_boxplot(input: &str) -> IResult<&str, Layer> {
     Ok((input, Layer::Boxplot(layer)))
 }
 
+/// Parse a violin geometry
+/// Format: violin() or violin(color: "blue", alpha: 0.7, width: 0.8, draw_quantiles: [0.25, 0.5, 0.75])
+pub fn parse_violin(input: &str) -> IResult<&str, Layer> {
+    let (input, _) = ws(tag("violin"))(input)?;
+    let (input, _) = ws(char('('))(input)?;
+
+    let (input, args) = separated_list0(
+        ws(char(',')),
+        alt((
+            map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
+            map(preceded(ws(tag("y:")), ws(identifier)), |y| ("y", ArgValue::ColumnName(y))),
+
+            map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
+            map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
+
+            map(preceded(ws(tag("width:")), ws(number_literal)), |w| ("width", ArgValue::NumericFixed(w))),
+            map(preceded(ws(tag("width:")), ws(identifier)), |w| ("width", ArgValue::NumericMapped(w))),
+
+            map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
+            map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
+
+            // Violin-specific: draw_quantiles array
+            map(preceded(ws(tag("draw_quantiles:")), ws(parse_number_array)), |q| ("draw_quantiles", ArgValue::NumberArray(q))),
+        ))
+    )(input)?;
+
+    let (input, _) = ws(char(')'))(input)?;
+
+    let mut layer = ViolinLayer::default();
+
+    for (key, val) in args {
+        match (key, val) {
+            ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
+            ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
+            ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
+            ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
+            ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
+            ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
+            ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
+            ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
+            ("draw_quantiles", ArgValue::NumberArray(q)) => layer.draw_quantiles = q,
+            _ => {}
+        }
+    }
+
+    // Set stat with draw_quantiles for transform phase
+    layer.stat = crate::parser::ast::Stat::Violin { draw_quantiles: layer.draw_quantiles.clone() };
+
+    Ok((input, Layer::Violin(layer)))
+}
+
 /// Parse any geometry layer
 pub fn parse_geom(input: &str) -> IResult<&str, Layer> {
-    alt((parse_line, parse_point, parse_bar, parse_ribbon, parse_histogram, parse_smooth, parse_boxplot))(input)
+    alt((parse_line, parse_point, parse_bar, parse_ribbon, parse_histogram, parse_smooth, parse_boxplot, parse_violin))(input)
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crate::ir::{RenderData, ScaleSystem, ResolvedSpec, SceneGraph, PanelScene, DrawCommand, RenderStyle};
 use crate::parser::ast::{Layer, BarPosition};
-use crate::graph::{LineStyle, PointStyle, BarStyle, BoxplotStyle};
+use crate::graph::{LineStyle, PointStyle, BarStyle, BoxplotStyle, RibbonStyle};
 use crate::RenderOptions;
 
 use std::collections::HashMap;
@@ -98,6 +98,32 @@ fn boxplot_component_styles(style: &BoxplotStyle) -> (LineStyle, BarStyle, LineS
     (whisker_style, box_style, median_style, outlier_style)
 }
 
+// =============================================================================
+// Violin Geometry Helpers
+// =============================================================================
+
+/// Interpolate density at a given y value
+fn interpolate_density_at_y(target_y: f64, density: &[f64], density_y: &[f64]) -> f64 {
+    if density.is_empty() || density_y.is_empty() {
+        return 0.0;
+    }
+
+    // Find bracketing indices
+    for i in 0..density_y.len() - 1 {
+        if density_y[i] <= target_y && target_y <= density_y[i + 1] {
+            let t = (target_y - density_y[i]) / (density_y[i + 1] - density_y[i]);
+            return density[i] * (1.0 - t) + density[i + 1] * t;
+        }
+    }
+
+    // Out of range - return endpoint density
+    if target_y < density_y[0] {
+        density[0]
+    } else {
+        density[density.len() - 1]
+    }
+}
+
 /// Compile data and scales into a SceneGraph of drawing commands
 pub fn compile_geometry(
     data: RenderData, 
@@ -121,6 +147,7 @@ pub fn compile_geometry(
             let (_is_bar, position) = match &layer_spec.original_layer {
                 Layer::Bar(b) => (true, b.position.clone()),
                 Layer::Boxplot(_) => (true, BarPosition::Dodge),
+                Layer::Violin(_) => (true, BarPosition::Dodge),
                 _ => (false, BarPosition::Identity),
             };
 
@@ -309,14 +336,14 @@ pub fn compile_geometry(
                     RenderStyle::Ribbon(style) => {
                         // Construct Polygon: Trace y_max forward, then y_min backward
                         let mut points = Vec::with_capacity(group.x.len() * 2);
-                        
+
                         // Forward pass: y_max
                         for i in 0..group.x.len() {
                             let x = group.x[i];
                             let y = group.y_max[i];
                             points.push(if is_flipped { (y, x) } else { (x, y) });
                         }
-                        
+
                         // Backward pass: y_min
                         for i in (0..group.x.len()).rev() {
                             let x = group.x[i];
@@ -329,6 +356,157 @@ pub fn compile_geometry(
                             style: style.clone(),
                             legend: Some(group.key.clone()),
                         });
+                    }
+                    RenderStyle::Violin(style) => {
+                        let width_ratio = style.width.unwrap_or(0.8);
+                        let is_vertical = !is_flipped;
+
+                        for i in 0..group.x.len() {
+                            let x_center = group.x[i];
+
+                            // Calculate Dodge Offset (same as boxplot)
+                            let (slot_width, x_offset) = if matches!(position, BarPosition::Dodge) {
+                                let key = x_center.round() as i64;
+                                if let Some(occupants) = x_occupancy.get(&key) {
+                                    let num_at_x = occupants.len();
+                                    if let Some(rank) = occupants.iter().position(|&g| g == group_idx) {
+                                        let slot = width_ratio / num_at_x as f64;
+                                        let offset = (rank as f64 - (num_at_x as f64 - 1.0) / 2.0) * slot;
+                                        (slot, offset)
+                                    } else {
+                                        (width_ratio, 0.0)
+                                    }
+                                } else {
+                                    (width_ratio, 0.0)
+                                }
+                            } else {
+                                (width_ratio, 0.0)
+                            };
+
+                            let x_final = x_center + x_offset;
+                            let half_width = slot_width / 2.0;
+
+                            // Get density data for this category
+                            let density = &group.violin_density[i];
+                            let density_y = &group.violin_density_y[i];
+
+                            if density.is_empty() || density_y.is_empty() {
+                                continue;
+                            }
+
+                            // Build violin polygon: trimmed at data min/max with flat caps (like ggplot2)
+                            let data_min = group.y_min[i];
+                            let data_max = group.y_max[i];
+
+                            // Collect points within data range, with interpolated endpoints
+                            let mut right_side: Vec<(f64, f64)> = Vec::new();
+                            let mut left_side: Vec<(f64, f64)> = Vec::new();
+
+                            // Get density at data boundaries by interpolation
+                            let density_at_min = interpolate_density_at_y(data_min, density, density_y);
+                            let density_at_max = interpolate_density_at_y(data_max, density, density_y);
+
+                            if is_vertical {
+                                // Start with flat bottom cap at data_min
+                                let width_at_min = density_at_min * half_width;
+                                right_side.push((x_final + width_at_min, data_min));
+
+                                // Add points within data range (bottom to top)
+                                for j in 0..density.len() {
+                                    let y = density_y[j];
+                                    if y > data_min && y < data_max {
+                                        let x_offset_density = density[j] * half_width;
+                                        right_side.push((x_final + x_offset_density, y));
+                                    }
+                                }
+
+                                // End with flat top cap at data_max
+                                let width_at_max = density_at_max * half_width;
+                                right_side.push((x_final + width_at_max, data_max));
+
+                                // Mirror for left side (top to bottom)
+                                left_side.push((x_final - width_at_max, data_max));
+                                for j in (0..density.len()).rev() {
+                                    let y = density_y[j];
+                                    if y > data_min && y < data_max {
+                                        let x_offset_density = density[j] * half_width;
+                                        left_side.push((x_final - x_offset_density, y));
+                                    }
+                                }
+                                left_side.push((x_final - width_at_min, data_min));
+                            } else {
+                                // Horizontal orientation (coord_flip)
+                                // Start with flat left cap at data_min
+                                let width_at_min = density_at_min * half_width;
+                                right_side.push((data_min, x_final + width_at_min));
+
+                                // Add points within data range (left to right)
+                                for j in 0..density.len() {
+                                    let y_coord = density_y[j];
+                                    if y_coord > data_min && y_coord < data_max {
+                                        let offset = density[j] * half_width;
+                                        right_side.push((y_coord, x_final + offset));
+                                    }
+                                }
+
+                                // End with flat right cap at data_max
+                                let width_at_max = density_at_max * half_width;
+                                right_side.push((data_max, x_final + width_at_max));
+
+                                // Mirror for bottom side (right to left)
+                                left_side.push((data_max, x_final - width_at_max));
+                                for j in (0..density.len()).rev() {
+                                    let y_coord = density_y[j];
+                                    if y_coord > data_min && y_coord < data_max {
+                                        let offset = density[j] * half_width;
+                                        left_side.push((y_coord, x_final - offset));
+                                    }
+                                }
+                                left_side.push((data_min, x_final - width_at_min));
+                            }
+
+                            // Combine into closed polygon
+                            let mut polygon_points = right_side;
+                            polygon_points.extend(left_side);
+
+                            // Draw violin body as polygon
+                            commands.push(DrawCommand::DrawPolygon {
+                                points: polygon_points,
+                                style: RibbonStyle {
+                                    color: style.color.clone(),
+                                    alpha: style.alpha.or(Some(0.7)),
+                                },
+                                legend: if i == 0 { Some(group.key.clone()) } else { None },
+                            });
+
+                            // Draw quantile lines (if any)
+                            // Use pre-computed quantile y-values from transform phase
+                            let quantile_y_values = &group.violin_quantile_values[i];
+                            for (q_idx, &q_y) in quantile_y_values.iter().enumerate() {
+                                if q_idx >= style.draw_quantiles.len() {
+                                    break;
+                                }
+
+                                // Interpolate density at this y value
+                                let half_width_at_q = interpolate_density_at_y(q_y, density, density_y) * half_width;
+
+                                let line_points = if is_vertical {
+                                    vec![(x_final - half_width_at_q, q_y), (x_final + half_width_at_q, q_y)]
+                                } else {
+                                    vec![(q_y, x_final - half_width_at_q), (q_y, x_final + half_width_at_q)]
+                                };
+
+                                commands.push(DrawCommand::DrawLine {
+                                    points: line_points,
+                                    style: LineStyle {
+                                        color: Some("white".to_string()),
+                                        width: Some(1.5),
+                                        alpha: Some(0.9),
+                                    },
+                                    legend: None,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -393,6 +571,9 @@ mod tests {
                         y_median: vec![],
                         y_q3: vec![],
                         outliers: vec![],
+                        violin_density: vec![],
+                        violin_density_y: vec![],
+                        violin_quantile_values: vec![],
                         x_categories: None,
                         style: RenderStyle::Line(LineStyle::default()),
                     }],

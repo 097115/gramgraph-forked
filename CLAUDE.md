@@ -161,7 +161,7 @@ GramGraph implements a hierarchical theme system inspired by ggplot2, using elem
 - `axis_text`: Axis label styling (element_text)
 - `axis_line`: Axis line styling (element_line or element_blank)
 - `axis_ticks`: Tick mark styling (element_line or element_blank)
-- `legend_position`: "right" | "left" | "top" | "bottom" | "none"
+- `legend_position`: "right" | "left" | "top" | "bottom" | "upper-right" | "upper-middle" | "upper-left" | "middle-right" | "middle-middle" | "middle-left" | "lower-right" | "lower-middle" | "lower-left" | "none"
 
 **Color Formats:**
 - Named colors: "red", "blue", "gray", "white", etc.

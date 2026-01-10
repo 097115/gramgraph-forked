@@ -319,13 +319,32 @@ impl Canvas {
             }
         }
         
-        // Draw Legend if any items
+        // Draw Legend if any items (respecting theme legend_position)
         // Note: Plotters draws legend only if series were labeled
-        chart.configure_series_labels()
-            .background_style(&WHITE.mix(0.8))
-            .border_style(&BLACK)
-            .draw()
-            .context("Failed to draw legend")?;
+        use crate::parser::ast::LegendPosition;
+        use plotters::chart::SeriesLabelPosition;
+
+        if theme.legend_position != LegendPosition::None {
+            let position = match theme.legend_position {
+                LegendPosition::UpperLeft => SeriesLabelPosition::UpperLeft,
+                LegendPosition::UpperMiddle => SeriesLabelPosition::UpperMiddle,
+                LegendPosition::UpperRight => SeriesLabelPosition::UpperRight,
+                LegendPosition::MiddleLeft => SeriesLabelPosition::MiddleLeft,
+                LegendPosition::MiddleMiddle => SeriesLabelPosition::MiddleMiddle,
+                LegendPosition::MiddleRight => SeriesLabelPosition::MiddleRight,
+                LegendPosition::LowerLeft => SeriesLabelPosition::LowerLeft,
+                LegendPosition::LowerMiddle => SeriesLabelPosition::LowerMiddle,
+                LegendPosition::LowerRight => SeriesLabelPosition::LowerRight,
+                LegendPosition::None => unreachable!(), // handled above
+            };
+
+            chart.configure_series_labels()
+                .position(position)
+                .background_style(&WHITE.mix(0.8))
+                .border_style(&BLACK)
+                .draw()
+                .context("Failed to draw legend")?;
+        }
 
         Ok(())
     }

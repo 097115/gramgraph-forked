@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_parse_plot_spec_with_facet_wrap_full() {
-        let result = parse_plot_spec(r#"aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: Some(2), scales: "free_x")"#);
+        let result = parse_plot_spec(r#"aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: 2, scales: "free_x")"#);
         assert!(result.is_ok());
         let (_, spec) = result.unwrap();
         assert!(spec.facet.is_some());

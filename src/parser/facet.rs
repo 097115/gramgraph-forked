@@ -63,10 +63,7 @@ fn parse_facet_argument(input: &str) -> IResult<&str, (String, FacetArgValue)> {
             (input, FacetArgValue::column(col))
         }
         "ncol" => {
-            let (input, _) = ws(tag("Some"))(input)?;
-            let (input, _) = ws(char('('))(input)?;
-            let (input, n) = nom::character::complete::u32(input)?;
-            let (input, _) = ws(char(')'))(input)?;
+            let (input, n) = ws(nom::character::complete::u32)(input)?;
             (input, FacetArgValue::ncol(n as usize))
         }
         "scales" => {
@@ -142,7 +139,7 @@ mod tests {
 
     #[test]
     fn test_parse_facet_wrap_with_ncol() {
-        let result = parse_facet_wrap("facet_wrap(by: region, ncol: Some(2))");
+        let result = parse_facet_wrap("facet_wrap(by: region, ncol: 2)");
         assert!(result.is_ok());
         let (_, facet) = result.unwrap();
         assert_eq!(facet.by, "region");
@@ -176,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_parse_facet_wrap_all_args() {
-        let result = parse_facet_wrap(r#"facet_wrap(by: region, ncol: Some(3), scales: "free_x")"#);
+        let result = parse_facet_wrap(r#"facet_wrap(by: region, ncol: 3, scales: "free_x")"#);
         assert!(result.is_ok());
         let (_, facet) = result.unwrap();
         assert_eq!(facet.by, "region");
@@ -193,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_parse_facet_wrap_with_whitespace() {
-        let result = parse_facet_wrap(r#"facet_wrap( by : region , ncol : Some(2) )"#);
+        let result = parse_facet_wrap(r#"facet_wrap( by : region , ncol : 2 )"#);
         assert!(result.is_ok());
         let (_, facet) = result.unwrap();
         assert_eq!(facet.by, "region");

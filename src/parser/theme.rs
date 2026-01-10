@@ -157,12 +157,17 @@ fn parse_legend_position_arg(input: &str) -> IResult<&str, ThemeArg> {
     let (input, _) = ws(tag("legend_position:"))(input)?;
     let (input, val) = ws(string_literal)(input)?;
     let pos = match val.as_str() {
-        "right" => LegendPosition::Right,
-        "left" => LegendPosition::Left,
-        "top" => LegendPosition::Top,
-        "bottom" => LegendPosition::Bottom,
+        "upper-left" => LegendPosition::UpperLeft,
+        "upper-middle" | "top" => LegendPosition::UpperMiddle,
+        "upper-right" => LegendPosition::UpperRight,
+        "middle-left" | "left" => LegendPosition::MiddleLeft,
+        "middle-middle" | "center" => LegendPosition::MiddleMiddle,
+        "middle-right" | "right" => LegendPosition::MiddleRight,
+        "lower-left" => LegendPosition::LowerLeft,
+        "lower-middle" | "bottom" => LegendPosition::LowerMiddle,
+        "lower-right" => LegendPosition::LowerRight,
         "none" => LegendPosition::None,
-        _ => LegendPosition::Right,
+        _ => LegendPosition::UpperRight,
     };
     Ok((input, ThemeArg::LegendPosition(pos)))
 }
@@ -214,7 +219,7 @@ pub fn parse_theme_minimal(input: &str) -> IResult<&str, Theme> {
         axis_text: ThemeElement::Inherit,
         axis_line: ThemeElement::Blank,
         axis_ticks: ThemeElement::Blank,
-        legend_position: LegendPosition::Right,
+        legend_position: LegendPosition::UpperRight,
     }))
 }
 
@@ -333,7 +338,7 @@ mod tests {
         let result = parse_theme("theme(legend_position: \"bottom\")");
         assert!(result.is_ok());
         let (_, theme) = result.unwrap();
-        assert_eq!(theme.legend_position, LegendPosition::Bottom);
+        assert_eq!(theme.legend_position, LegendPosition::LowerMiddle);
     }
 
     #[test]

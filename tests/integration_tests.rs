@@ -234,7 +234,7 @@ fn test_end_to_end_facet_wrap_scatter() {
 #[test]
 fn test_end_to_end_facet_with_ncol() {
     let csv = fs::read_to_string("fixtures/multiregion_sales.csv").expect("Failed to read test CSV");
-    let result = run_gramgraph("aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: Some(2))", &csv);
+    let result = run_gramgraph("aes(x: time, y: sales) | line() | facet_wrap(by: region, ncol: 2)", &csv);
     assert!(result.is_ok(), "Failed: {:?}", result.err());
     let png_bytes = result.unwrap();
     assert!(is_valid_png(&png_bytes));

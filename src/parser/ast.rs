@@ -8,16 +8,21 @@ pub enum CoordSystem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LegendPosition {
-    Right,
-    Left,
-    Top,
-    Bottom,
+    UpperLeft,
+    UpperMiddle,
+    UpperRight,
+    MiddleLeft,
+    MiddleMiddle,
+    MiddleRight,
+    LowerLeft,
+    LowerMiddle,
+    LowerRight,
     None,
 }
 
 impl Default for LegendPosition {
     fn default() -> Self {
-        LegendPosition::Right
+        LegendPosition::UpperRight
     }
 }
 
@@ -109,7 +114,7 @@ impl Default for Theme {
             axis_text: ThemeElement::Inherit,
             axis_line: ThemeElement::Inherit,
             axis_ticks: ThemeElement::Inherit,
-            legend_position: LegendPosition::Right,
+            legend_position: LegendPosition::UpperRight,
         }
     }
 }

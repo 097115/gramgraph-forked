@@ -186,6 +186,61 @@ src/
 
 See `src/parser/` for DSL additions and `src/transform.rs` for new statistical capabilities.
 
+## Development Guidelines
+
+### Primitive-Only Rendering Backend
+
+The rendering backend (`graph.rs`) must only know about **primitive drawing commands**:
+
+| Primitive | Purpose |
+|-----------|---------|
+| `DrawLine` | Polylines, whiskers, axes |
+| `DrawRect` | Bars, boxes, filled regions |
+| `DrawPoint` | Scatter points, outliers |
+| `DrawPolygon` | Ribbons, filled areas |
+
+**Never add geometry-specific commands** (e.g., `DrawBoxplot`, `DrawViolin`) to `DrawCommand` or `graph.rs`.
+
+### Adding a New Geometry
+
+When implementing a new geometry (e.g., violin plot), follow this pattern:
+
+1. **Parser** (`src/parser/geom.rs`, `src/parser/ast.rs`)
+   - Add AST types for the new layer
+   - Parse DSL syntax into the AST
+
+2. **Transform** (`src/transform.rs`)
+   - Compute any required statistics (e.g., density estimation for violin)
+   - Store results in `GroupData` fields
+
+3. **Compiler** (`src/compiler.rs`)
+   - Convert the high-level geometry into **primitive commands**
+   - Handle positioning, dodging, and orientation
+   - Example: A violin plot becomes `DrawPolygon` commands
+
+4. **Rendering** (`src/graph.rs`)
+   - **No changes required** - primitives are already supported
+
+### Why This Matters
+
+This separation follows `ggplot2`'s architecture where the Grid graphics system never knows it's drawing a boxplot - it just draws rectangles and lines. Benefits:
+
+- **Zero backend changes** for new geometries
+- **Simpler renderer** - no statistical logic in drawing code
+- **Easier testing** - primitives are straightforward to verify
+- **Better maintainability** - geometry logic is localized in compiler
+
+### Phase Responsibilities
+
+| Phase | Module | Responsibility |
+|-------|--------|----------------|
+| Parse | `parser/` | DSL → AST |
+| Resolve | `resolve.rs` | Validate columns, merge aesthetics |
+| Transform | `transform.rs` | Statistics, grouping, stacking |
+| Scale | `scale.rs` | Domain/range calculation |
+| Compile | `compiler.rs` | **Geometry → Primitives** |
+| Render | `graph.rs` | Primitives → Pixels/SVG |
+
 ## License
 
 [Add your license here]

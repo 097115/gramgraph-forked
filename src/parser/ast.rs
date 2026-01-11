@@ -190,6 +190,8 @@ pub enum AestheticValue<T> {
     Fixed(T),
     /// Column name for data-driven mapping (e.g., aes(color: region))
     Mapped(String),
+    /// Variable reference for runtime substitution (e.g., $varname)
+    Variable(String),
 }
 
 /// Statistical transformation to apply

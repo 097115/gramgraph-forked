@@ -1,10 +1,16 @@
 use anyhow::Result;
+use std::collections::HashMap;
 use crate::parser::ast::PlotSpec;
 use crate::data::PlotData;
 use crate::{resolve, transform, scale, compiler, graph, RenderOptions};
 
 /// Render a plot specification to PNG bytes using the Ideal GoG Pipeline
-pub fn render_plot(spec: PlotSpec, data: PlotData, options: RenderOptions) -> Result<Vec<u8>> {
+pub fn render_plot(
+    spec: PlotSpec,
+    data: PlotData,
+    options: RenderOptions,
+    variables: HashMap<String, String>,
+) -> Result<Vec<u8>> {
     // Check for empty data (maintain legacy behavior for tests)
     if data.rows.is_empty() {
         anyhow::bail!("Plot requires at least one data row");
@@ -12,7 +18,8 @@ pub fn render_plot(spec: PlotSpec, data: PlotData, options: RenderOptions) -> Re
 
     // PHASE 1: RESOLUTION
     // Resolve all aesthetics for all layers once.
-    let resolved_spec = resolve::resolve_plot_aesthetics(&spec, &data)?;
+    // Variables are substituted during resolution.
+    let resolved_spec = resolve::resolve_plot_aesthetics(&spec, &data, &variables)?;
 
     // PHASE 2: TRANSFORMATION
     // Apply stats (binning) and positions (stacking/dodging).

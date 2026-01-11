@@ -33,6 +33,7 @@ This architecture enables powerful, declarative chart specifications with clean 
 - **Flexible Parsing**: Order-independent named arguments in DSL
 - **Data Abstraction**: Internal `PlotData` type for flexible data input (e.g., CSV, JSON)
 - **Render Options**: Configurable output dimensions (`--width`, `--height`) and format (`--format png | svg`)
+- **Variable Injection**: Runtime substitution with `-D`/`--define` flags for reusable plot templates
 
 ### 🚀 Coming Soon
 
@@ -113,6 +114,15 @@ cat data.csv | gramgraph 'aes(x: time, y: mean, ymin: lower, ymax: upper) | ribb
 cat data.csv | gramgraph 'aes(x: depth, y: pressure) | line() | labs(title: "Depth Profile") | scale_x_reverse()'
 ```
 
+**Variable Injection:**
+```bash
+# Variables in aesthetics and labels
+cat data.csv | gramgraph 'aes(x: $xcol, y: $ycol) | line() | labs(title: $title)' -D xcol=time -D ycol=value -D title="My Chart"
+
+# Variables in geometry styling
+cat data.csv | gramgraph 'aes(x: time, y: value) | line(color: $color, width: $width)' -D color=red -D width=2
+```
+
 ### Supported Commands
 
 #### `aes(...)`
@@ -189,6 +199,30 @@ Creates small multiples.
 - `--width <pixels>`: Sets the output width in pixels (default: 800).
 - `--height <pixels>`: Sets the output height in pixels (default: 600).
 - `--format <png|svg>`: Sets the output format (default: png).
+- `-D, --define <KEY=VALUE>`: Define variables for DSL substitution. Can be used multiple times (e.g., `-D x=time -D color=red`).
+
+#### Variable Injection
+
+Variables use the `$name` syntax and can be substituted at runtime using `-D`/`--define` flags. This enables reusable plot templates.
+
+**Supported Locations:**
+- **Aesthetics**: `aes(x: $xcol, y: $ycol, color: $groupby)`
+- **Geometry properties**: `line(color: $color, width: $width)`, `point(size: $size, alpha: $alpha)`
+- **Labels**: `labs(title: $title, x: $xlabel, y: $ylabel)`
+- **Facets**: `facet_wrap(by: $facetcol)`
+
+**Example:**
+```bash
+# Reusable template
+cat sales.csv | gramgraph 'aes(x: $x, y: $y, color: $group) | line() | labs(title: $title)' \
+  -D x=date -D y=revenue -D group=region -D title="Sales by Region"
+```
+
+**Error Handling:**
+If a variable is used but not defined, a helpful error message is shown:
+```
+Variable 'undefined' not defined. Use -D undefined=value to define it.
+```
 
 ## Module Structure
 

@@ -1,7 +1,7 @@
 // Lexer utilities for GramGraph DSL
 
 use nom::{
-    bytes::complete::{take_while1},
+    bytes::complete::{tag, take_while1},
     character::complete::{char, multispace0},
     combinator::recognize,
     number::complete::double,
@@ -47,6 +47,14 @@ pub fn string_literal(input: &str) -> IResult<&str, String> {
 /// Parse a number literal (integer or float)
 pub fn number_literal(input: &str) -> IResult<&str, f64> {
     double(input)
+}
+
+/// Parse a variable reference ($identifier)
+/// Returns just the variable name without the $ prefix
+pub fn variable_reference(input: &str) -> IResult<&str, String> {
+    let (input, _) = tag("$")(input)?;
+    let (input, name) = identifier(input)?;
+    Ok((input, name))
 }
 
 #[cfg(test)]
@@ -117,5 +125,22 @@ mod tests {
         assert_eq!(number_literal("-42"), Ok(("", -42.0)));
         assert_eq!(number_literal("-3.5"), Ok(("", -3.5)));
         assert_eq!(number_literal("-0.1"), Ok(("", -0.1)));
+    }
+
+    #[test]
+    fn test_variable_reference() {
+        assert_eq!(variable_reference("$foo"), Ok(("", "foo".to_string())));
+        assert_eq!(variable_reference("$col_name"), Ok(("", "col_name".to_string())));
+        assert_eq!(variable_reference("$x123"), Ok(("", "x123".to_string())));
+    }
+
+    #[test]
+    fn test_variable_reference_invalid() {
+        // Missing $ should fail
+        assert!(variable_reference("foo").is_err());
+        // $ alone should fail
+        assert!(variable_reference("$").is_err());
+        // $ followed by number should fail
+        assert!(variable_reference("$123").is_err());
     }
 }

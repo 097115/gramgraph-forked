@@ -148,6 +148,24 @@ cat examples/financials.csv | gramgraph 'aes(x: quarter, y: amount, color: type)
 
 ![Merged Theme](examples/theme_merged.png)
 
+### Variable Injection
+
+Use `-D` / `--define` to inject variables into your DSL at runtime. Variables use the `$name` syntax.
+
+```bash
+cat examples/timeseries.csv | gramgraph 'aes(x: $xcol, y: $ycol, color: series) | line() | labs(title: $title)' -D xcol=time -D ycol=value -D title="Variable Injection Example" > examples/variable_aes.png
+```
+
+![Variable Injection](examples/variable_aes.png)
+
+Variables work in aesthetics, geometries, and labels:
+
+```bash
+cat examples/demographics.csv | gramgraph 'aes(x: height, y: weight) | point(color: $color, size: $size) | labs(title: "Styled with Variables")' -D color=blue -D size=8 > examples/variable_geom.png
+```
+
+![Variable Geometry](examples/variable_geom.png)
+
 ## Installation
 
 ```bash

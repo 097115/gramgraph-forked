@@ -1,10 +1,12 @@
 // Aesthetics parser for Grammar of Graphics DSL
 
 use super::ast::Aesthetics;
-use super::lexer::{identifier, ws};
+use super::lexer::{identifier, variable_reference, ws};
 use nom::{
+    branch::alt,
     bytes::complete::tag,
     character::complete::char,
+    combinator::map,
     multi::separated_list0,
     IResult,
 };
@@ -61,10 +63,15 @@ pub fn parse_aesthetics(input: &str) -> IResult<&str, Aesthetics> {
 }
 
 /// Parse a single aesthetic argument (key: value)
+/// Values can be identifiers (column names) or variable references ($varname)
 fn parse_aesthetic_argument(input: &str) -> IResult<&str, (String, String)> {
     let (input, key) = ws(identifier)(input)?;
     let (input, _) = ws(char(':'))(input)?;
-    let (input, value) = ws(identifier)(input)?;
+    // Accept either variable reference ($var -> "$var") or identifier (col -> "col")
+    let (input, value) = alt((
+        map(ws(variable_reference), |v| format!("${}", v)), // Prepend $ to mark as variable
+        ws(identifier),
+    ))(input)?;
     Ok((input, (key, value)))
 }
 
@@ -120,5 +127,24 @@ mod tests {
         assert!(result.is_ok());
         let (_, aes) = result.unwrap();
         assert_eq!(aes.x, "value");
+    }
+
+    #[test]
+    fn test_parse_aesthetics_with_variables() {
+        let result = parse_aesthetics("aes(x: $xcol, y: $ycol)");
+        assert!(result.is_ok());
+        let (_, aes) = result.unwrap();
+        assert_eq!(aes.x, "$xcol");
+        assert_eq!(aes.y, Some("$ycol".to_string()));
+    }
+
+    #[test]
+    fn test_parse_aesthetics_mixed_variables_and_columns() {
+        let result = parse_aesthetics("aes(x: time, y: $metric, color: region)");
+        assert!(result.is_ok());
+        let (_, aes) = result.unwrap();
+        assert_eq!(aes.x, "time");
+        assert_eq!(aes.y, Some("$metric".to_string()));
+        assert_eq!(aes.color, Some("region".to_string()));
     }
 }

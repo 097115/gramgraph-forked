@@ -61,12 +61,16 @@ pub fn process_dsl(
     options: RenderOptions,
     variables: HashMap<String, String>,
 ) -> Result<Vec<u8>> {
+    // 1. Preprocess: Expand variables immediately
+    let expanded_dsl = gramgraph::preprocessor::expand_variables(dsl, &variables)
+        .context("Failed to expand variables")?;
+
     // Read CSV
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(csv_content);
 
     let headers = reader
         .headers()
-        .context("Failed to read CSV headers")?
+        .context("Failed to read CSV headers")? 
         .iter()
         .map(|s| s.to_string())
         .collect();
@@ -86,7 +90,7 @@ pub fn process_dsl(
     let plot_data = PlotData::from_csv(csv_data);
 
     // Parse the DSL string
-    let plot_spec = match parser::parse_plot_spec(dsl) {
+    let plot_spec = match parser::parse_plot_spec(&expanded_dsl) {
         Ok((remaining, plot_spec)) => {
             if !remaining.trim().is_empty() {
                 eprintln!("Warning: unparsed input: '{}'", remaining);
@@ -99,7 +103,7 @@ pub fn process_dsl(
     };
 
     // Render the plot
-    runtime::render_plot(plot_spec, plot_data, options, variables).context("Failed to render plot")
+    runtime::render_plot(plot_spec, plot_data, options).context("Failed to render plot")
 }
 
 fn main() -> Result<()> {
@@ -240,7 +244,8 @@ mod tests {
         let csv = "x,y\n1,10\n2,20\n";
         let cursor = Cursor::new(csv);
         let mut vars = HashMap::new();
-        vars.insert("line_color".to_string(), "red".to_string());
+        // Quote the value to make it a string literal
+        vars.insert("line_color".to_string(), "\"red\"".to_string());
         let result = process_dsl("aes(x: x, y: y) | line(color: $line_color)", cursor, RenderOptions::default(), vars);
         assert!(result.is_ok());
     }
@@ -254,6 +259,6 @@ mod tests {
         assert!(result.is_err());
         // Check the full error chain
         let err_str = format!("{:?}", result.unwrap_err());
-        assert!(err_str.contains("undefined") || err_str.contains("not defined"));
+        assert!(err_str.contains("Variable '$undefined' not defined"));
     }
 }

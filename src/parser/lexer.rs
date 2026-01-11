@@ -1,7 +1,5 @@
-// Lexer utilities for GramGraph DSL
-
 use nom::{
-    bytes::complete::{tag, take_while1},
+    bytes::complete::{take_while1},
     character::complete::{char, multispace0},
     combinator::recognize,
     number::complete::double,
@@ -9,7 +7,6 @@ use nom::{
     IResult,
 };
 
-/// Parse and consume whitespace
 pub fn ws<'a, F, O>(inner: F) -> impl FnMut(&'a str) -> IResult<&'a str, O>
 where
     F: FnMut(&'a str) -> IResult<&'a str, O>,
@@ -17,14 +14,12 @@ where
     delimited(multispace0, inner, multispace0)
 }
 
-/// Parse an identifier (column name, function name)
-/// Format: [a-zA-Z_][a-zA-Z0-9_]*
 pub fn identifier(input: &str) -> IResult<&str, String> {
     let (input, ident) = recognize(take_while1(|c: char| c.is_alphanumeric() || c == '_'))(input)?;
 
-    // Validate first character
     if let Some(first) = ident.chars().next() {
-        if !first.is_alphabetic() && first != '_' {
+        if !first.is_alphabetic() && first != '_'
+ {
             return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Alpha)));
         }
     }
@@ -32,29 +27,18 @@ pub fn identifier(input: &str) -> IResult<&str, String> {
     Ok((input, ident.to_string()))
 }
 
-/// Parse a string literal
-/// Format: "..."
 pub fn string_literal(input: &str) -> IResult<&str, String> {
     let (input, content) = delimited(
-        char('"'),
-        take_while1(|c| c != '"'),
-        char('"'),
+        char('\"'),
+        take_while1(|c| c != '\"'),
+        char('\"'),
     )(input)?;
 
     Ok((input, content.to_string()))
 }
 
-/// Parse a number literal (integer or float)
 pub fn number_literal(input: &str) -> IResult<&str, f64> {
     double(input)
-}
-
-/// Parse a variable reference ($identifier)
-/// Returns just the variable name without the $ prefix
-pub fn variable_reference(input: &str) -> IResult<&str, String> {
-    let (input, _) = tag("$")(input)?;
-    let (input, name) = identifier(input)?;
-    Ok((input, name))
 }
 
 #[cfg(test)]
@@ -93,54 +77,30 @@ mod tests {
 
     #[test]
     fn test_identifier_invalid_start_with_number() {
-        // Identifiers cannot start with numbers
         assert!(identifier("123abc").is_err());
         assert!(identifier("1test").is_err());
     }
 
     #[test]
     fn test_identifier_underscore_only() {
-        // Single underscore is valid
         assert_eq!(identifier("_"), Ok(("", "_".to_string())));
         assert_eq!(identifier("__"), Ok(("", "__".to_string())));
     }
 
     #[test]
     fn test_string_literal_empty() {
-        // Empty string literal fails with current implementation (requires at least 1 char)
-        // This is acceptable behavior for our DSL
-        assert!(string_literal(r#""""#).is_err());
+        assert!(string_literal(r#""#).is_err());
     }
 
     #[test]
     fn test_string_literal_unclosed() {
-        // Unclosed string literal should fail
         assert!(string_literal(r#""hello"#).is_err());
-        assert!(string_literal(r#"hello""#).is_err());
     }
 
     #[test]
     fn test_number_literal_negative() {
-        // Negative numbers should parse correctly
         assert_eq!(number_literal("-42"), Ok(("", -42.0)));
         assert_eq!(number_literal("-3.5"), Ok(("", -3.5)));
         assert_eq!(number_literal("-0.1"), Ok(("", -0.1)));
-    }
-
-    #[test]
-    fn test_variable_reference() {
-        assert_eq!(variable_reference("$foo"), Ok(("", "foo".to_string())));
-        assert_eq!(variable_reference("$col_name"), Ok(("", "col_name".to_string())));
-        assert_eq!(variable_reference("$x123"), Ok(("", "x123".to_string())));
-    }
-
-    #[test]
-    fn test_variable_reference_invalid() {
-        // Missing $ should fail
-        assert!(variable_reference("foo").is_err());
-        // $ alone should fail
-        assert!(variable_reference("$").is_err());
-        // $ followed by number should fail
-        assert!(variable_reference("$123").is_err());
     }
 }

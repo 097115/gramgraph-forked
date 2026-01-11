@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use crate::parser::ast::PlotSpec;
 use crate::data::PlotData;
 use crate::{resolve, transform, scale, compiler, graph, RenderOptions};
@@ -9,7 +8,6 @@ pub fn render_plot(
     spec: PlotSpec,
     data: PlotData,
     options: RenderOptions,
-    variables: HashMap<String, String>,
 ) -> Result<Vec<u8>> {
     // Check for empty data (maintain legacy behavior for tests)
     if data.rows.is_empty() {
@@ -19,7 +17,7 @@ pub fn render_plot(
     // PHASE 1: RESOLUTION
     // Resolve all aesthetics for all layers once.
     // Variables are substituted during resolution.
-    let resolved_spec = resolve::resolve_plot_aesthetics(&spec, &data, &variables)?;
+    let resolved_spec = resolve::resolve_plot_aesthetics(&spec, &data)?;
 
     // PHASE 2: TRANSFORMATION
     // Apply stats (binning) and positions (stacking/dodging).

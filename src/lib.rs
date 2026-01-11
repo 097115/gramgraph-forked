@@ -14,6 +14,7 @@ pub mod transform;
 pub mod scale;
 pub mod compiler;
 pub mod theme_resolve;
+pub mod preprocessor;
 
 use serde::Deserialize;
 

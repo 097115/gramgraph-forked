@@ -81,10 +81,10 @@ cat examples/financials.csv | cargo run -- 'aes(x: quarter, y: amount, color: ty
 
 # Variable injection in aesthetics
 echo "Generating variable_aes.png..."
-cat examples/timeseries.csv | cargo run -- 'aes(x: $xcol, y: $ycol, color: series) | line() | labs(title: $title)' -D xcol=time -D ycol=value -D title="Variable Injection Example" > examples/variable_aes.png
+cat examples/timeseries.csv | cargo run -- 'aes(x: $xcol, y: $ycol, color: series) | line() | labs(title: $title)' -D xcol=time -D ycol=value -D title='"Variable Injection Example"' > examples/variable_aes.png
 
 # Variable injection in geometry styling
 echo "Generating variable_geom.png..."
-cat examples/demographics.csv | cargo run -- 'aes(x: height, y: weight) | point(color: $color, size: $size) | labs(title: "Styled with Variables")' -D color=blue -D size=8 > examples/variable_geom.png
+cat examples/demographics.csv | cargo run -- 'aes(x: height, y: weight) | point(color: $color, size: $size) | labs(title: "Styled with Variables")' -D color='"blue"' -D size=8 > examples/variable_geom.png
 
 echo "Done! All examples generated in the examples/ directory."

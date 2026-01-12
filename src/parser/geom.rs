@@ -1,7 +1,7 @@
 // Geometry (geom) parser for Grammar of Graphics DSL
 
 use super::ast::{AestheticValue, BarLayer, BarPosition, BoxplotLayer, Layer, LineLayer, PointLayer, RibbonLayer, ViolinLayer};
-use super::lexer::{identifier, number_literal, string_literal, variable_reference, ws};
+use super::lexer::{identifier, number_literal, string_literal, ws};
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -15,13 +15,10 @@ use nom::{
 /// Argument value type for geometry parsers
 enum ArgValue {
     ColumnName(String),        // x, y aesthetic overrides
-    ColumnVariable(String),    // x: $var, y: $var (variable reference for column)
     ColorFixed(String),        // color: "red" (literal)
     ColorMapped(String),       // color: region (column)
-    ColorVariable(String),     // color: $var (variable reference)
     NumericFixed(f64),         // width: 2, alpha: 0.5
     NumericMapped(String),     // width: size_col, alpha: alpha_col
-    NumericVariable(String),   // width: $var (variable reference)
     NumberArray(Vec<f64>),     // draw_quantiles: [0.25, 0.5, 0.75]
 }
 
@@ -34,7 +31,7 @@ fn parse_number_array(input: &str) -> IResult<&str, Vec<f64>> {
 }
 
 /// Parse a line geometry
-/// Format: line() or line(color: "red", width: 2, ...) or line(color: region) or line(color: $var)
+/// Format: line() or line(color: "red", width: 2, ...) or line(color: region)
 pub fn parse_line(input: &str) -> IResult<&str, Layer> {
     let (input, _) = ws(tag("line"))(input)?;
     let (input, _) = ws(char('('))(input)?;
@@ -43,58 +40,38 @@ pub fn parse_line(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(
-                preceded(ws(tag("x:")), ws(variable_reference)),
-                |x| ("x", ArgValue::ColumnVariable(x)),
-            ),
+            // x: can be column
             map(
                 preceded(ws(tag("x:")), ws(identifier)),
                 |x| ("x", ArgValue::ColumnName(x)),
             ),
-            // y: can be column or $var
-            map(
-                preceded(ws(tag("y:")), ws(variable_reference)),
-                |y| ("y", ArgValue::ColumnVariable(y)),
-            ),
+            // y: can be column
             map(
                 preceded(ws(tag("y:")), ws(identifier)),
                 |y| ("y", ArgValue::ColumnName(y)),
             ),
-            // color: can be "red" (literal), region (column), or $var
+            // color: can be "red" (literal), region (column)
             map(
                 preceded(ws(tag("color:")), ws(string_literal)),
                 |c| ("color", ArgValue::ColorFixed(c)),
             ),
             map(
-                preceded(ws(tag("color:")), ws(variable_reference)),
-                |c| ("color", ArgValue::ColorVariable(c)),
-            ),
-            map(
                 preceded(ws(tag("color:")), ws(identifier)),
                 |c| ("color", ArgValue::ColorMapped(c)),
             ),
-            // width: can be 2.0 (literal), width_col (column), or $var
+            // width: can be 2.0 (literal), width_col (column)
             map(
                 preceded(ws(tag("width:")), ws(number_literal)),
                 |w| ("width", ArgValue::NumericFixed(w)),
             ),
             map(
-                preceded(ws(tag("width:")), ws(variable_reference)),
-                |w| ("width", ArgValue::NumericVariable(w)),
-            ),
-            map(
                 preceded(ws(tag("width:")), ws(identifier)),
                 |w| ("width", ArgValue::NumericMapped(w)),
             ),
-            // alpha: can be 0.5 (literal), alpha_col (column), or $var
+            // alpha: can be 0.5 (literal), alpha_col (column)
             map(
                 preceded(ws(tag("alpha:")), ws(number_literal)),
                 |a| ("alpha", ArgValue::NumericFixed(a)),
-            ),
-            map(
-                preceded(ws(tag("alpha:")), ws(variable_reference)),
-                |a| ("alpha", ArgValue::NumericVariable(a)),
             ),
             map(
                 preceded(ws(tag("alpha:")), ws(identifier)),
@@ -110,18 +87,13 @@ pub fn parse_line(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)), // Mark as variable
             ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
-            ("y", ArgValue::ColumnVariable(y)) => layer.y = Some(format!("${}", y)), // Mark as variable
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
             ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
-            ("width", ArgValue::NumericVariable(w)) => layer.width = Some(AestheticValue::Variable(w)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             _ => {}
         }
     }
@@ -130,7 +102,7 @@ pub fn parse_line(input: &str) -> IResult<&str, Layer> {
 }
 
 /// Parse a point geometry
-/// Format: point() or point(size: 5, color: "blue", ...) or point(color: region, size: metric) or point(color: $var)
+/// Format: point() or point(size: 5, color: "blue", ...) or point(color: region, size: metric)
 pub fn parse_point(input: &str) -> IResult<&str, Layer> {
     let (input, _) = ws(tag("point"))(input)?;
     let (input, _) = ws(char('('))(input)?;
@@ -139,71 +111,47 @@ pub fn parse_point(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(
-                preceded(ws(tag("x:")), ws(variable_reference)),
-                |x| ("x", ArgValue::ColumnVariable(x)),
-            ),
+            // x: can be column
             map(
                 preceded(ws(tag("x:")), ws(identifier)),
                 |x| ("x", ArgValue::ColumnName(x)),
             ),
-            // y: can be column or $var
-            map(
-                preceded(ws(tag("y:")), ws(variable_reference)),
-                |y| ("y", ArgValue::ColumnVariable(y)),
-            ),
+            // y: can be column
             map(
                 preceded(ws(tag("y:")), ws(identifier)),
                 |y| ("y", ArgValue::ColumnName(y)),
             ),
-            // color: can be "blue" (literal), region (column), or $var
+            // color: can be "blue" (literal), region (column)
             map(
                 preceded(ws(tag("color:")), ws(string_literal)),
                 |c| ("color", ArgValue::ColorFixed(c)),
             ),
             map(
-                preceded(ws(tag("color:")), ws(variable_reference)),
-                |c| ("color", ArgValue::ColorVariable(c)),
-            ),
-            map(
                 preceded(ws(tag("color:")), ws(identifier)),
                 |c| ("color", ArgValue::ColorMapped(c)),
             ),
-            // size: can be 5.0 (literal), size_col (column), or $var
+            // size: can be 5.0 (literal), size_col (column)
             map(
                 preceded(ws(tag("size:")), ws(number_literal)),
                 |s| ("size", ArgValue::NumericFixed(s)),
             ),
             map(
-                preceded(ws(tag("size:")), ws(variable_reference)),
-                |s| ("size", ArgValue::NumericVariable(s)),
-            ),
-            map(
                 preceded(ws(tag("size:")), ws(identifier)),
                 |s| ("size", ArgValue::NumericMapped(s)),
             ),
-            // shape: can be "circle" (literal), shape_col (column), or $var
+            // shape: can be "circle" (literal), shape_col (column)
             map(
                 preceded(ws(tag("shape:")), ws(string_literal)),
                 |sh| ("shape", ArgValue::ColorFixed(sh)),
             ),
             map(
-                preceded(ws(tag("shape:")), ws(variable_reference)),
-                |sh| ("shape", ArgValue::ColorVariable(sh)),
-            ),
-            map(
                 preceded(ws(tag("shape:")), ws(identifier)),
                 |sh| ("shape", ArgValue::ColorMapped(sh)),
             ),
-            // alpha: can be 0.8 (literal), alpha_col (column), or $var
+            // alpha: can be 0.8 (literal), alpha_col (column)
             map(
                 preceded(ws(tag("alpha:")), ws(number_literal)),
                 |a| ("alpha", ArgValue::NumericFixed(a)),
-            ),
-            map(
-                preceded(ws(tag("alpha:")), ws(variable_reference)),
-                |a| ("alpha", ArgValue::NumericVariable(a)),
             ),
             map(
                 preceded(ws(tag("alpha:")), ws(identifier)),
@@ -219,21 +167,15 @@ pub fn parse_point(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)),
             ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
-            ("y", ArgValue::ColumnVariable(y)) => layer.y = Some(format!("${}", y)),
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("size", ArgValue::NumericFixed(s)) => layer.size = Some(AestheticValue::Fixed(s)),
             ("size", ArgValue::NumericMapped(s)) => layer.size = Some(AestheticValue::Mapped(s)),
-            ("size", ArgValue::NumericVariable(s)) => layer.size = Some(AestheticValue::Variable(s)),
             ("shape", ArgValue::ColorFixed(sh)) => layer.shape = Some(AestheticValue::Fixed(sh)),
             ("shape", ArgValue::ColorMapped(sh)) => layer.shape = Some(AestheticValue::Mapped(sh)),
-            ("shape", ArgValue::ColorVariable(sh)) => layer.shape = Some(AestheticValue::Variable(sh)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             _ => {}
         }
     }
@@ -242,7 +184,7 @@ pub fn parse_point(input: &str) -> IResult<&str, Layer> {
 }
 
 /// Parse a bar geometry
-/// Format: bar() or bar(color: "red", position: "dodge", ...) or bar(color: region) or bar(color: $var)
+/// Format: bar() or bar(color: "red", position: "dodge", ...) or bar(color: region)
 pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
     let (input, _) = ws(tag("bar"))(input)?;
     let (input, _) = ws(char('('))(input)?;
@@ -251,58 +193,38 @@ pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(
-                preceded(ws(tag("x:")), ws(variable_reference)),
-                |x| ("x", ArgValue::ColumnVariable(x)),
-            ),
+            // x: can be column
             map(
                 preceded(ws(tag("x:")), ws(identifier)),
                 |x| ("x", ArgValue::ColumnName(x)),
             ),
-            // y: can be column or $var
-            map(
-                preceded(ws(tag("y:")), ws(variable_reference)),
-                |y| ("y", ArgValue::ColumnVariable(y)),
-            ),
+            // y: can be column
             map(
                 preceded(ws(tag("y:")), ws(identifier)),
                 |y| ("y", ArgValue::ColumnName(y)),
             ),
-            // color: can be "red" (literal), region (column), or $var
+            // color: can be "red" (literal), region (column)
             map(
                 preceded(ws(tag("color:")), ws(string_literal)),
                 |c| ("color", ArgValue::ColorFixed(c)),
             ),
             map(
-                preceded(ws(tag("color:")), ws(variable_reference)),
-                |c| ("color", ArgValue::ColorVariable(c)),
-            ),
-            map(
                 preceded(ws(tag("color:")), ws(identifier)),
                 |c| ("color", ArgValue::ColorMapped(c)),
             ),
-            // width: can be 0.8 (literal), width_col (column), or $var
+            // width: can be 0.8 (literal), width_col (column)
             map(
                 preceded(ws(tag("width:")), ws(number_literal)),
                 |w| ("width", ArgValue::NumericFixed(w)),
             ),
             map(
-                preceded(ws(tag("width:")), ws(variable_reference)),
-                |w| ("width", ArgValue::NumericVariable(w)),
-            ),
-            map(
                 preceded(ws(tag("width:")), ws(identifier)),
                 |w| ("width", ArgValue::NumericMapped(w)),
             ),
-            // alpha: can be 0.7 (literal), alpha_col (column), or $var
+            // alpha: can be 0.7 (literal), alpha_col (column)
             map(
                 preceded(ws(tag("alpha:")), ws(number_literal)),
                 |a| ("alpha", ArgValue::NumericFixed(a)),
-            ),
-            map(
-                preceded(ws(tag("alpha:")), ws(variable_reference)),
-                |a| ("alpha", ArgValue::NumericVariable(a)),
             ),
             map(
                 preceded(ws(tag("alpha:")), ws(identifier)),
@@ -323,18 +245,13 @@ pub fn parse_bar(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)),
             ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
-            ("y", ArgValue::ColumnVariable(y)) => layer.y = Some(format!("${}", y)),
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
             ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
-            ("width", ArgValue::NumericVariable(w)) => layer.width = Some(AestheticValue::Variable(w)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             ("position", ArgValue::ColorFixed(p)) => {
                 layer.position = match p.as_str() {
                     "dodge" => BarPosition::Dodge,
@@ -358,24 +275,19 @@ pub fn parse_ribbon(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(preceded(ws(tag("x:")), ws(variable_reference)), |x| ("x", ArgValue::ColumnVariable(x))),
+            // x: can be column
             map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
-            // ymin: can be column or $var
-            map(preceded(ws(tag("ymin:")), ws(variable_reference)), |y| ("ymin", ArgValue::ColumnVariable(y))),
+            // ymin: can be column
             map(preceded(ws(tag("ymin:")), ws(identifier)), |y| ("ymin", ArgValue::ColumnName(y))),
-            // ymax: can be column or $var
-            map(preceded(ws(tag("ymax:")), ws(variable_reference)), |y| ("ymax", ArgValue::ColumnVariable(y))),
+            // ymax: can be column
             map(preceded(ws(tag("ymax:")), ws(identifier)), |y| ("ymax", ArgValue::ColumnName(y))),
 
-            // color: can be "literal", column, or $var
+            // color: can be "literal", column
             map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
-            map(preceded(ws(tag("color:")), ws(variable_reference)), |c| ("color", ArgValue::ColorVariable(c))),
             map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
 
-            // alpha: can be number, column, or $var
+            // alpha: can be number, column
             map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
-            map(preceded(ws(tag("alpha:")), ws(variable_reference)), |a| ("alpha", ArgValue::NumericVariable(a))),
             map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
         ))
     )(input)?;
@@ -387,17 +299,12 @@ pub fn parse_ribbon(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)),
             ("ymin", ArgValue::ColumnName(y)) => layer.ymin = Some(y),
-            ("ymin", ArgValue::ColumnVariable(y)) => layer.ymin = Some(format!("${}", y)),
             ("ymax", ArgValue::ColumnName(y)) => layer.ymax = Some(y),
-            ("ymax", ArgValue::ColumnVariable(y)) => layer.ymax = Some(format!("${}", y)),
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             _ => {}
         }
     }
@@ -437,26 +344,21 @@ pub fn parse_boxplot(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(preceded(ws(tag("x:")), ws(variable_reference)), |x| ("x", ArgValue::ColumnVariable(x))),
+            // x: can be column
             map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
-            // y: can be column or $var
-            map(preceded(ws(tag("y:")), ws(variable_reference)), |y| ("y", ArgValue::ColumnVariable(y))),
+            // y: can be column
             map(preceded(ws(tag("y:")), ws(identifier)), |y| ("y", ArgValue::ColumnName(y))),
 
-            // color: can be "literal", column, or $var
+            // color: can be "literal", column
             map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
-            map(preceded(ws(tag("color:")), ws(variable_reference)), |c| ("color", ArgValue::ColorVariable(c))),
             map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
 
-            // width: can be number, column, or $var
+            // width: can be number, column
             map(preceded(ws(tag("width:")), ws(number_literal)), |w| ("width", ArgValue::NumericFixed(w))),
-            map(preceded(ws(tag("width:")), ws(variable_reference)), |w| ("width", ArgValue::NumericVariable(w))),
             map(preceded(ws(tag("width:")), ws(identifier)), |w| ("width", ArgValue::NumericMapped(w))),
 
-            // alpha: can be number, column, or $var
+            // alpha: can be number, column
             map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
-            map(preceded(ws(tag("alpha:")), ws(variable_reference)), |a| ("alpha", ArgValue::NumericVariable(a))),
             map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
 
             // Outlier specific args (keep as fixed for simplicity)
@@ -474,18 +376,13 @@ pub fn parse_boxplot(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)),
             ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
-            ("y", ArgValue::ColumnVariable(y)) => layer.y = Some(format!("${}", y)),
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
             ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
-            ("width", ArgValue::NumericVariable(w)) => layer.width = Some(AestheticValue::Variable(w)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             ("outlier_color", ArgValue::ColorFixed(c)) => layer.outlier_color = Some(c),
             ("outlier_size", ArgValue::NumericFixed(s)) => layer.outlier_size = Some(s),
             ("outlier_shape", ArgValue::ColorFixed(sh)) => layer.outlier_shape = Some(sh),
@@ -497,7 +394,7 @@ pub fn parse_boxplot(input: &str) -> IResult<&str, Layer> {
 }
 
 /// Parse a violin geometry
-/// Format: violin() or violin(color: "blue", alpha: 0.7, width: 0.8, draw_quantiles: [0.25, 0.5, 0.75]) or violin(color: $var)
+/// Format: violin() or violin(color: "blue", alpha: 0.7, width: 0.8, draw_quantiles: [0.25, 0.5, 0.75])
 pub fn parse_violin(input: &str) -> IResult<&str, Layer> {
     let (input, _) = ws(tag("violin"))(input)?;
     let (input, _) = ws(char('('))(input)?;
@@ -505,26 +402,21 @@ pub fn parse_violin(input: &str) -> IResult<&str, Layer> {
     let (input, args) = separated_list0(
         ws(char(',')),
         alt((
-            // x: can be column or $var
-            map(preceded(ws(tag("x:")), ws(variable_reference)), |x| ("x", ArgValue::ColumnVariable(x))),
+            // x: can be column
             map(preceded(ws(tag("x:")), ws(identifier)), |x| ("x", ArgValue::ColumnName(x))),
-            // y: can be column or $var
-            map(preceded(ws(tag("y:")), ws(variable_reference)), |y| ("y", ArgValue::ColumnVariable(y))),
+            // y: can be column
             map(preceded(ws(tag("y:")), ws(identifier)), |y| ("y", ArgValue::ColumnName(y))),
 
-            // color: can be "literal", column, or $var
+            // color: can be "literal", column
             map(preceded(ws(tag("color:")), ws(string_literal)), |c| ("color", ArgValue::ColorFixed(c))),
-            map(preceded(ws(tag("color:")), ws(variable_reference)), |c| ("color", ArgValue::ColorVariable(c))),
             map(preceded(ws(tag("color:")), ws(identifier)), |c| ("color", ArgValue::ColorMapped(c))),
 
-            // width: can be number, column, or $var
+            // width: can be number, column
             map(preceded(ws(tag("width:")), ws(number_literal)), |w| ("width", ArgValue::NumericFixed(w))),
-            map(preceded(ws(tag("width:")), ws(variable_reference)), |w| ("width", ArgValue::NumericVariable(w))),
             map(preceded(ws(tag("width:")), ws(identifier)), |w| ("width", ArgValue::NumericMapped(w))),
 
-            // alpha: can be number, column, or $var
+            // alpha: can be number, column
             map(preceded(ws(tag("alpha:")), ws(number_literal)), |a| ("alpha", ArgValue::NumericFixed(a))),
-            map(preceded(ws(tag("alpha:")), ws(variable_reference)), |a| ("alpha", ArgValue::NumericVariable(a))),
             map(preceded(ws(tag("alpha:")), ws(identifier)), |a| ("alpha", ArgValue::NumericMapped(a))),
 
             // Violin-specific: draw_quantiles array
@@ -539,18 +431,13 @@ pub fn parse_violin(input: &str) -> IResult<&str, Layer> {
     for (key, val) in args {
         match (key, val) {
             ("x", ArgValue::ColumnName(x)) => layer.x = Some(x),
-            ("x", ArgValue::ColumnVariable(x)) => layer.x = Some(format!("${}", x)),
             ("y", ArgValue::ColumnName(y)) => layer.y = Some(y),
-            ("y", ArgValue::ColumnVariable(y)) => layer.y = Some(format!("${}", y)),
             ("color", ArgValue::ColorFixed(c)) => layer.color = Some(AestheticValue::Fixed(c)),
             ("color", ArgValue::ColorMapped(c)) => layer.color = Some(AestheticValue::Mapped(c)),
-            ("color", ArgValue::ColorVariable(c)) => layer.color = Some(AestheticValue::Variable(c)),
             ("width", ArgValue::NumericFixed(w)) => layer.width = Some(AestheticValue::Fixed(w)),
             ("width", ArgValue::NumericMapped(w)) => layer.width = Some(AestheticValue::Mapped(w)),
-            ("width", ArgValue::NumericVariable(w)) => layer.width = Some(AestheticValue::Variable(w)),
             ("alpha", ArgValue::NumericFixed(a)) => layer.alpha = Some(AestheticValue::Fixed(a)),
             ("alpha", ArgValue::NumericMapped(a)) => layer.alpha = Some(AestheticValue::Mapped(a)),
-            ("alpha", ArgValue::NumericVariable(a)) => layer.alpha = Some(AestheticValue::Variable(a)),
             ("draw_quantiles", ArgValue::NumberArray(q)) => layer.draw_quantiles = q,
             _ => {}
         }
@@ -758,50 +645,6 @@ mod tests {
                 assert_eq!(l.width, Some(AestheticValue::Fixed(2.0)));
             }
             _ => panic!("Expected Line layer"),
-        }
-    }
-
-    #[test]
-    fn test_parse_line_with_variable_color() {
-        // Test variable reference for color
-        let result = parse_line("line(color: $my_color)");
-        assert!(result.is_ok());
-        let (_, layer) = result.unwrap();
-        match layer {
-            Layer::Line(l) => {
-                assert_eq!(l.color, Some(AestheticValue::Variable("my_color".to_string())));
-            }
-            _ => panic!("Expected Line layer"),
-        }
-    }
-
-    #[test]
-    fn test_parse_point_with_variable_size() {
-        // Test variable reference for numeric property
-        let result = parse_point("point(size: $point_size, alpha: $opacity)");
-        assert!(result.is_ok());
-        let (_, layer) = result.unwrap();
-        match layer {
-            Layer::Point(p) => {
-                assert_eq!(p.size, Some(AestheticValue::Variable("point_size".to_string())));
-                assert_eq!(p.alpha, Some(AestheticValue::Variable("opacity".to_string())));
-            }
-            _ => panic!("Expected Point layer"),
-        }
-    }
-
-    #[test]
-    fn test_parse_bar_with_variable_x_y() {
-        // Test variable reference for x and y columns
-        let result = parse_bar("bar(x: $xcol, y: $ycol)");
-        assert!(result.is_ok());
-        let (_, layer) = result.unwrap();
-        match layer {
-            Layer::Bar(b) => {
-                assert_eq!(b.x, Some("$xcol".to_string()));
-                assert_eq!(b.y, Some("$ycol".to_string()));
-            }
-            _ => panic!("Expected Bar layer"),
         }
     }
 }
